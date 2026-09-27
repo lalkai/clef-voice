@@ -42,8 +42,11 @@ core/bin/
 core/third_party/
 build/
 bin/
-clefd
-clefd.exe
+/clefd
+/clefd.exe
+core/clefd
+core/clefd.exe
+!core/cmd/clefd/
 *.o
 *.a
 *.so

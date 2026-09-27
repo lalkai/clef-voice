@@ -33,11 +33,19 @@ if [ ! -f "$CMAKE_BUILD/CMakeCache.txt" ]; then
         -DGGML_METAL=ON \
         -DGGML_METAL_EMBED_LIBRARY=ON \
         -DGGML_BLAS=ON \
-        > "$BUILD/cmake-configure.log" 2>&1
+        > "$BUILD/cmake-configure.log" 2>&1 || {
+            echo "CMake configuration failed. Log:" >&2
+            cat "$BUILD/cmake-configure.log" >&2
+            exit 1
+        }
 fi
 
 echo "Building whisper.cpp..."
-cmake --build "$CMAKE_BUILD" --target whisper -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" > "$BUILD/cmake-build.log" 2>&1
+cmake --build "$CMAKE_BUILD" --target whisper -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" > "$BUILD/cmake-build.log" 2>&1 || {
+    echo "CMake build failed. Log:" >&2
+    cat "$BUILD/cmake-build.log" >&2
+    exit 1
+}
 
 # Collect the static libraries into a single directory.
 find "$CMAKE_BUILD" -name 'libwhisper.a' -o -name 'libggml*.a' | while read -r lib; do
