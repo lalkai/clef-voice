@@ -1,6 +1,6 @@
 {
   "name": "clef-voice",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "ClefVoice: macOS Swift Native Helper + Go core + Web (React) Settings UI",
   "private": true,
   "type": "module",
