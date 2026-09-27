@@ -1,0 +1,63 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: macOS Build & Test
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: core/go.sum
+
+      - name: Build & Test Go Core
+        run: make -C core build && make -C core test
+
+      - name: Install Frontend Dependencies
+        run: npm --prefix app ci
+
+      - name: Frontend Typecheck & Build
+        run: npm --prefix app run build
+
+      - name: Frontend API Tests
+        run: node --test app/tests/api.test.mjs
+
+      - name: Build macOS App
+        run: make -C native/macos build
+
+      - name: Swift Tests
+        run: make -C native/macos test
+
+  # Windows is not enabled yet; the helper still needs a packaged clefd.exe.
+  # build-windows:
+  #   name: Windows Build & Test
+  #   runs-on: windows-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: "8.0.x"
+  #     - name: Build Windows C# Helper
+  #       run: dotnet build native/windows/ClefVoice.Windows.csproj -c Release

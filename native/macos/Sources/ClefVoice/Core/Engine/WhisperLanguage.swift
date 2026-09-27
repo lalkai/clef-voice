@@ -1,0 +1,66 @@
+import Foundation
+
+/// Recognition language metadata. Data-only; the actual transcription runs in the Go core.
+public enum WhisperLanguage: String, CaseIterable, Identifiable, Codable, Sendable {
+    case thai = "th"
+    case english = "en"
+    case japanese = "ja"
+    case chinese = "zh"
+    case spanish = "es"
+    case french = "fr"
+    case german = "de"
+    case korean = "ko"
+    case vietnamese = "vi"
+    case indonesian = "id"
+    case malay = "ms"
+    case filipino = "tl"
+    case arabic = "ar"
+    case hindi = "hi"
+    case portuguese = "pt"
+    case russian = "ru"
+    case italian = "it"
+    case turkish = "tr"
+    case dutch = "nl"
+    case swedish = "sv"
+    case polish = "pl"
+    case czech = "cs"
+    case greek = "el"
+    case hebrew = "he"
+    case lao = "lo"
+    case burmese = "my"
+    case khmer = "km"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .thai: "🇹🇭 Thai (ภาษาไทย)"
+        case .english: "🇺🇸 English"
+        case .japanese: "🇯🇵 Japanese (日本語)"
+        case .chinese: "🇨🇳 Chinese (中文)"
+        case .spanish: "🇪🇸 Spanish (Español)"
+        case .french: "🇫🇷 French (Français)"
+        case .german: "🇩🇪 German (Deutsch)"
+        case .korean: "🇰🇷 Korean (한국어)"
+        case .vietnamese: "🇻🇳 Vietnamese (Tiếng Việt)"
+        case .indonesian: "🇮🇩 Indonesian (Bahasa Indonesia)"
+        case .malay: "🇲🇾 Malay (Bahasa Melayu)"
+        case .filipino: "🇵🇭 Filipino (Tagalog)"
+        case .arabic: "🇸🇦 Arabic (العربية)"
+        case .hindi: "🇮🇳 Hindi (हिन्दी)"
+        case .portuguese: "🇧🇷 Portuguese (Português)"
+        case .russian: "🇷🇺 Russian (Русский)"
+        case .italian: "🇮🇹 Italian (Italiano)"
+        case .turkish: "🇹🇷 Turkish (Türkçe)"
+        case .dutch: "🇳🇱 Dutch (Nederlands)"
+        case .swedish: "🇸🇪 Swedish (Svenska)"
+        case .polish: "🇵🇱 Polish (Polski)"
+        case .czech: "🇨🇿 Czech (Čeština)"
+        case .greek: "🇬🇷 Greek (Ελληνικά)"
+        case .hebrew: "🇮🇱 Hebrew (עברית)"
+        case .lao: "🇱🇦 Lao (ລາວ)"
+        case .burmese: "🇲🇲 Burmese (မြန်မာ)"
+        case .khmer: "🇰🇭 Khmer (ខ្មែរ)"
+        }
+    }
+}

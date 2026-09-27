@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: #101012;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* macOS Window Dragging */
+.drag-region { -webkit-app-region: drag; }
+.no-drag, button, input, select, textarea, a { -webkit-app-region: no-drag; }
+
+/* View transition — short, ease-out only */
+.animate-view {
+  animation: viewIn 180ms ease-out both;
+}
+
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+/* Modal entrance */
+.animate-modal {
+  animation: modalIn 160ms ease-out both;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.97); }
+}
+
+/* Listening waveform bars */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+.wave-bar {
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  transform-origin: bottom;
+  animation: wave 600ms ease-in-out infinite;
+}
+
+.wave-bar:nth-child(2) { animation-delay: 100ms; }
+.wave-bar:nth-child(3) { animation-delay: 200ms; }
+.wave-bar:nth-child(4) { animation-delay: 300ms; }
+
+/* Shimmer shine for power bars */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2.2s infinite ease-in-out;
+}
+
+/* Scrollbar — 5px, barely visible */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+
+/* Remove spinner from number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
