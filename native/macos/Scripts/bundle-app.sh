@@ -13,6 +13,7 @@ CORE_DIR="$PROJECT_ROOT/core"
 APP_NAME="ClefVoice"
 BUNDLE_ID="com.clefvoice.app"
 APP_DIR="$MACOS_DIR/$APP_NAME.app"
+APP_VERSION="${APP_VERSION:-$(node -p "require('$PROJECT_ROOT/package.json').version" 2>/dev/null || echo "1.0.0")}"
 
 # 1. Build the Go core engine (whisper.cpp + clefd)
 echo "🐹 Building Go core engine (clefd)..."
@@ -81,7 +82,7 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
     <key>CFBundleDisplayName</key>
     <string>ClefVoice</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.5</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundlePackageType</key>

@@ -4,13 +4,14 @@ APP_NAME = ClefVoice
 APP_BUNDLE = $(APP_NAME).app
 INSTALL_PATH = /Applications/$(APP_BUNDLE)
 
-.PHONY: all build run install test clean help
+.PHONY: all build run install test clean package help
 
 all: build
 
 help:
 	@echo "Available commands:"
 	@echo "  make build      - Build and bundle the application into $(APP_BUNDLE)"
+	@echo "  make package    - Package $(APP_BUNDLE) into DMG and ZIP"
 	@echo "  make run        - Open/Run the compiled application"
 	@echo "  make install    - Install $(APP_BUNDLE) permanently to $(INSTALL_PATH)"
 	@echo "  make test       - Run Swift tests"
@@ -20,6 +21,12 @@ help:
 build:
 	@echo "Building $(APP_NAME) bundle..."
 	./Scripts/bundle-app.sh
+
+package: build
+	@echo "Packaging $(APP_NAME) into DMG and ZIP..."
+	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(APP_BUNDLE)" -ov -format UDZO "$(APP_NAME).dmg"
+	ditto -c -k --sequesterRsrc --keepParent "$(APP_BUNDLE)" "$(APP_NAME).zip"
+	@echo "✅ Packaged: $(APP_NAME).dmg and $(APP_NAME).zip"
 
 run: build
 	@echo "Launching $(APP_NAME)..."

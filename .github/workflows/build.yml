@@ -3,12 +3,13 @@ name: Build & Test
 on:
   push:
     branches: [main, "feature/**"]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-macos:
@@ -27,7 +28,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
+          go-version-file: core/go.mod
           cache-dependency-path: core/go.sum
 
       - name: Build & Test Go Core
@@ -47,6 +48,39 @@ jobs:
 
       - name: Swift Tests
         run: make -C native/macos test
+
+      - name: Package macOS App (DMG & ZIP)
+        run: |
+          if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            PKG_VER=$(node -p "require('./package.json').version" 2>/dev/null || echo "latest")
+            VERSION="v${PKG_VER#v}"
+          fi
+          echo "Packaging ClefVoice version: $VERSION"
+          cd native/macos
+          hdiutil create -volname "ClefVoice" -srcfolder "ClefVoice.app" -ov -format UDZO "ClefVoice-${VERSION}-macOS.dmg"
+          ditto -c -k --sequesterRsrc --keepParent "ClefVoice.app" "ClefVoice-${VERSION}-macOS.zip"
+          ls -lh ClefVoice-*-macOS.*
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClefVoice-macOS
+          path: |
+            native/macos/ClefVoice-*-macOS.dmg
+            native/macos/ClefVoice-*-macOS.zip
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ClefVoice ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            native/macos/ClefVoice-*-macOS.dmg
+            native/macos/ClefVoice-*-macOS.zip
 
   # Windows is not enabled yet; the helper still needs a packaged clefd.exe.
   # build-windows:
