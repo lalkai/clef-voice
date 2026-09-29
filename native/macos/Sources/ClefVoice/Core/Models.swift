@@ -54,12 +54,12 @@ public struct TranscriptionEntry: Identifiable, Equatable {
 }
 
 public enum Log {
-    public static let app = Logger(subsystem: "com.clefvoice.app", category: "app")
-    public static let session = Logger(subsystem: "com.clefvoice.app", category: "session")
-    public static let whisper = Logger(subsystem: "com.clefvoice.app", category: "whisper")
-    public static let model = Logger(subsystem: "com.clefvoice.app", category: "model")
-    public static let audio = Logger(subsystem: "com.clefvoice.app", category: "audio")
-    public static let hotkey = Logger(subsystem: "com.clefvoice.app", category: "hotkey")
-    public static let text = Logger(subsystem: "com.clefvoice.app", category: "text")
-    public static let engine = Logger(subsystem: "com.clefvoice.app", category: "engine")
+    public static let app = Logger(subsystem: AppConfig.bundleIdentifier, category: "app")
+    public static let session = Logger(subsystem: AppConfig.bundleIdentifier, category: "session")
+    public static let whisper = Logger(subsystem: AppConfig.bundleIdentifier, category: "whisper")
+    public static let model = Logger(subsystem: AppConfig.bundleIdentifier, category: "model")
+    public static let audio = Logger(subsystem: AppConfig.bundleIdentifier, category: "audio")
+    public static let hotkey = Logger(subsystem: AppConfig.bundleIdentifier, category: "hotkey")
+    public static let text = Logger(subsystem: AppConfig.bundleIdentifier, category: "text")
+    public static let engine = Logger(subsystem: AppConfig.bundleIdentifier, category: "engine")
 }

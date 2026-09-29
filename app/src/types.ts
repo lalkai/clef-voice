@@ -6,6 +6,7 @@ export interface Stats {
   speechWpm: number;
   minutesSaved: number;
   activeDays: number[];
+  averageProcessingSeconds?: number;
 }
 
 export interface PermissionsPayload {
@@ -21,6 +22,11 @@ export interface HistoryItem {
   charCount: number;
   wordCount: number;
   wpm: number;
+  createdAt?: string;
+  processingSeconds?: number;
+  durationSeconds?: number;
+  model?: string;
+  favorite?: boolean;
 }
 
 export interface Settings {

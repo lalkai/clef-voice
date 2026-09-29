@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/clefvoice/core/internal/appconfig"
 )
 
 const baseURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
@@ -20,15 +22,13 @@ type Size struct {
 	SHA256      string
 }
 
-// All available whisper model sizes.
-var (
-	Tiny         = Size{"tiny", "Tiny (~75 MB - Fast)", "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"}
-	Base         = Size{"base", "Base (~142 MB - Balanced)", "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"}
-	Small        = Size{"small", "Small (~466 MB - Accurate)", "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"}
-	LargeV3Turbo = Size{"large-v3-turbo", "Large V3 Turbo (~1.5 GB - Best)", "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"}
-
-	All = []Size{Tiny, Base, Small, LargeV3Turbo}
-)
+var All = func() []Size {
+	sizes := make([]Size, 0, len(appconfig.Models))
+	for _, model := range appconfig.Models {
+		sizes = append(sizes, Size{Str: model.ID, DisplayName: model.Label, SHA256: model.SHA256})
+	}
+	return sizes
+}()
 
 // FromStr resolves a size by its string identifier.
 func FromStr(s string) (Size, bool) {

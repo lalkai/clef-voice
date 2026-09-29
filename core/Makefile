@@ -5,18 +5,21 @@ ifeq ($(shell uname -s),Darwin)
 export SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path)
 endif
 
-.PHONY: all build whisper clean test
+.PHONY: all build config whisper clean test
 
 all: build
 
 # Build whisper.cpp static libs, then the Go daemon.
-build: whisper
+build: config whisper
 	CGO_ENABLED=1 go build -o $(OUT) ./cmd/clefd
+
+config:
+	node ../scripts/sync-config.mjs
 
 whisper:
 	./scripts/build-whisper.sh
 
-test:
+test: config
 	go test ./...
 
 clean:

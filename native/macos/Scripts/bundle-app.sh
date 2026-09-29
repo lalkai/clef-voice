@@ -10,10 +10,11 @@ MACOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CORE_DIR="$PROJECT_ROOT/core"
 
-APP_NAME="ClefVoice"
-BUNDLE_ID="com.clefvoice.app"
+node "$PROJECT_ROOT/scripts/sync-config.mjs"
+APP_NAME="$(node "$PROJECT_ROOT/scripts/sync-config.mjs" --get name)"
+BUNDLE_ID="$(node "$PROJECT_ROOT/scripts/sync-config.mjs" --get bundleIdentifier)"
 APP_DIR="$MACOS_DIR/$APP_NAME.app"
-APP_VERSION="${APP_VERSION:-$(node -p "require('$PROJECT_ROOT/package.json').version" 2>/dev/null || echo "1.0.0")}"
+APP_VERSION="$(node "$PROJECT_ROOT/scripts/sync-config.mjs" --get version)"
 
 # 1. Build the Go core engine (whisper.cpp + clefd)
 echo "🐹 Building Go core engine (clefd)..."
@@ -46,7 +47,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy binaries
-cp "$BUILD_DIR/$APP_NAME" "$APP_DIR/Contents/MacOS/$APP_NAME"
+cp "$BUILD_DIR/ClefVoice" "$APP_DIR/Contents/MacOS/$APP_NAME"
 cp "$CLEFD_BIN" "$APP_DIR/Contents/MacOS/clefd"
 
 # Copy app icon (committed under Assets/)
@@ -80,7 +81,7 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>
-    <string>ClefVoice</string>
+    <string>$APP_NAME</string>
     <key>CFBundleShortVersionString</key>
     <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>

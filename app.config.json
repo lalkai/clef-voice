@@ -1,0 +1,43 @@
+{
+  "version": "0.4.0",
+  "name": "ClefVoice",
+  "bundleIdentifier": "com.clefvoice.app",
+  "typingWpm": 40,
+  "defaultModel": "base",
+  "defaultVadThreshold": 0.012,
+  "vadLevels": {
+    "high": 0.005,
+    "normal": 0.012,
+    "low": 0.025
+  },
+  "models": [
+    {
+      "id": "tiny",
+      "name": "Tiny",
+      "label": "Tiny (~75 MB - Fast)",
+      "description": "Smallest download and lowest memory use. Useful for short phrases.",
+      "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+    },
+    {
+      "id": "base",
+      "name": "Base",
+      "label": "Base (~142 MB - Balanced)",
+      "description": "The default model. A modest download and memory footprint.",
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
+    },
+    {
+      "id": "small",
+      "name": "Small",
+      "label": "Small (~466 MB - Accurate)",
+      "description": "A larger model between Base and Large V3 Turbo in download size and memory use.",
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+    },
+    {
+      "id": "large-v3-turbo",
+      "name": "Turbo",
+      "label": "Large V3 Turbo (~1.5 GB - Best)",
+      "description": "Largest available model; uses more memory. Try with Thai names and mixed Thai/English.",
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
+    }
+  ]
+}

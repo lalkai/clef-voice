@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/clefvoice/core/internal/appconfig"
 	"github.com/clefvoice/core/internal/storage"
 )
 
@@ -28,11 +29,11 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Languages:        []string{"th", "en"},
-		Model:            "base",
+		Model:            appconfig.DefaultModel,
 		Hotkey:           "Fn",
 		UseGPU:           true,
 		VADEnabled:       true,
-		VADThreshold:     0.012,
+		VADThreshold:     appconfig.DefaultVADThreshold,
 		AutoStopEnabled:  false,
 		AutoStopSeconds:  0.9,
 		RemoveFiller:     true,

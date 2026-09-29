@@ -38,7 +38,7 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
             backing: .buffered,
             defer: false
         )
-        window.title = "ClefVoice"
+        window.title = AppConfig.name
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.contentView = containerView
@@ -188,6 +188,11 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
         case "toggleDictation":
             vm.toggleDictation()
             return nil
+        case "setHistoryFavorite":
+            if let id = params["id"] as? String, let favorite = params["favorite"] as? Bool {
+                vm.session.engine.send(["cmd": "set_history_favorite", "id": id, "favorite": favorite])
+            }
+            return nil
         default:
             return nil
         }
@@ -200,21 +205,26 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
 
     @MainActor
     private static func applySettings(_ json: [String: Any], vm: AppViewModel) {
-        var patch: [String: Any] = [:]
-        if let langs = json["selectedLanguages"] as? [String] { patch["languages"] = langs }
-        if let model = json["modelSize"] as? String { patch["model"] = model }
         if let raw = json["hotkey"] as? String, let hotkey = HotkeyType(persistedValue: raw) {
             vm.selectedHotkey = hotkey
         }
+        let patch = engineConfigPatch(json)
+        if !patch.isEmpty { vm.updateEngineConfig(patch: patch) }
+    }
+
+    static func engineConfigPatch(_ json: [String: Any]) -> [String: Any] {
+        var patch: [String: Any] = [:]
+        if let langs = json["selectedLanguages"] as? [String] { patch["languages"] = langs }
+        if let model = json["modelSize"] as? String { patch["model"] = model }
         if let vad = json["vadEnabled"] as? Bool { patch["vad_enabled"] = vad }
-        if let th = (json["vadThreshold"] as? NSNumber)?.floatValue { patch["vad_threshold"] = th }
+        if let th = (json["vadThreshold"] as? NSNumber)?.doubleValue { patch["vad_threshold"] = th }
         if let autoStop = json["autoStopEnabled"] as? Bool { patch["auto_stop_enabled"] = autoStop }
         if let secs = (json["autoStopSeconds"] as? NSNumber)?.doubleValue { patch["auto_stop_seconds"] = secs }
         if let remove = json["removeFillerWords"] as? Bool { patch["remove_filler_words"] = remove }
         if let cap = json["autoCapitalize"] as? Bool { patch["auto_capitalize"] = cap }
         if let vocab = json["customVocabulary"] as? [String] { patch["custom_vocabulary"] = vocab }
 
-        if !patch.isEmpty { vm.updateEngineConfig(patch: patch) }
+        return patch
     }
 
     // MARK: - JSON helpers

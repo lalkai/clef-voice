@@ -10,15 +10,24 @@ import {
   Copy,
   Trash2,
   Search,
-  ArrowRight,
   ShieldCheck,
   ChevronDown,
   X,
   RefreshCw,
+  Star,
 } from "lucide-react";
 import * as api from "./lib/api";
+import DashboardView from "./Dashboard";
 import { initEvents } from "./lib/events";
 import { useAppStore } from "./lib/store";
+import {
+  filterHistory,
+  formatProcessingTime,
+  historyTimestamp,
+} from "./lib/history";
+import { modelDescriptions } from "./lib/models";
+import { audioOptionValue } from "./lib/audioSettings";
+import { appConfig } from "./lib/appConfig.generated";
 import type {
   HistoryItem,
   Language,
@@ -28,6 +37,7 @@ import type {
 } from "./types";
 
 type TabId = "dashboard" | "history" | "vocabulary" | "audio" | "preferences";
+const appVersion = appConfig.version;
 const emptyPermissions: PermissionsPayload = {
   microphone: false,
   accessibility: false,
@@ -45,7 +55,8 @@ export default function MainApp() {
   const [modelSizes, setModelSizes] = useState<OptionItem[]>([]);
   const [hotkeys, setHotkeys] = useState<OptionItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [permissions, setPermissions] = useState<PermissionsPayload>(emptyPermissions);
+  const [permissions, setPermissions] =
+    useState<PermissionsPayload>(emptyPermissions);
   const [selectedTab, setSelectedTab] = useState<TabId>("dashboard");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -53,6 +64,7 @@ export default function MainApp() {
 
   const appStatus = useAppStore((s) => s.status);
   const statusMessage = useAppStore((s) => s.message);
+  const engineProgress = useAppStore((s) => s.progress);
 
   const [isReady, setIsReady] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
@@ -80,18 +92,24 @@ export default function MainApp() {
       if (s && settingsRevision.current === settingsSnapshotRevision) {
         setSettings({
           ...s,
-          vadThreshold: s.vadThreshold ?? 0.012,
-          customVocabulary: s.customVocabulary ?? ["ClefVoice", "TypeScript", "TailwindCSS"],
+          vadThreshold: s.vadThreshold ?? appConfig.defaultVadThreshold,
+          customVocabulary: s.customVocabulary ?? [
+            "ClefVoice",
+            "TypeScript",
+            "TailwindCSS",
+          ],
         });
       }
       setLanguages(l ?? []);
       setModelSizes(m ?? []);
       setHotkeys(h ?? []);
       setPermissions(p ?? emptyPermissions);
-      const [items, summary] = await Promise.all([api.getHistory(), api.getStats()]);
+      const [items, summary] = await Promise.all([
+        api.getHistory(),
+        api.getStats(),
+      ]);
       if (items) setHistory(items);
       if (summary) setStats(summary);
-
     } catch (e) {
       console.error("Failed to load data:", e);
     }
@@ -154,30 +172,62 @@ export default function MainApp() {
     return <StartupLoadingScreen progress={progress} isFadingOut={false} />;
   }
 
-  const hotkeyLabel = hotkeys.find((h) => h.value === settings.hotkey)?.label || settings.hotkey;
   const missingPermission = !permissions.microphone
     ? "Microphone access needed"
     : !permissions.accessibility
       ? "Accessibility access needed"
       : null;
-  const footerMessage = appStatus === "idle" && missingPermission ? missingPermission : statusMessage;
+  const footerMessage =
+    appStatus === "idle" && missingPermission
+      ? missingPermission
+      : appStatus === "downloading"
+        ? `${statusMessage} ${Math.round(engineProgress * 100)}%`
+        : statusMessage;
   const copyItem = (id: string, text: string) => {
     void navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1400);
   };
 
-  const tabs: { id: TabId; label: string; icon: React.ReactNode; count?: number }[] = [
-    { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={14} strokeWidth={1.8} /> },
-    { id: "history", label: "History", icon: <HistoryIcon size={14} strokeWidth={1.8} />, count: history.length },
-    { id: "vocabulary", label: "Vocabulary", icon: <BookOpen size={14} strokeWidth={1.8} /> },
-    { id: "audio", label: "Voice & Audio", icon: <Sliders size={14} strokeWidth={1.8} /> },
-    { id: "preferences", label: "Preferences", icon: <Settings2 size={14} strokeWidth={1.8} /> },
+  const tabs: {
+    id: TabId;
+    label: string;
+    icon: React.ReactNode;
+    count?: number;
+  }[] = [
+    {
+      id: "dashboard",
+      label: "Overview",
+      icon: <LayoutDashboard size={14} strokeWidth={1.8} />,
+    },
+    {
+      id: "history",
+      label: "History",
+      icon: <HistoryIcon size={14} strokeWidth={1.8} />,
+      count: history.length,
+    },
+    {
+      id: "vocabulary",
+      label: "Vocabulary",
+      icon: <BookOpen size={14} strokeWidth={1.8} />,
+    },
+    {
+      id: "audio",
+      label: "Voice & Audio",
+      icon: <Sliders size={14} strokeWidth={1.8} />,
+    },
+    {
+      id: "preferences",
+      label: "Preferences",
+      icon: <Settings2 size={14} strokeWidth={1.8} />,
+    },
   ];
 
   return (
     <div className="flex h-full w-full bg-[#101012] text-[#d4d4d8] select-none text-[13px] antialiased overflow-hidden relative">
-      {!isReady && <StartupLoadingScreen progress={progress} isFadingOut={isFadingOut} />}
+      {!isReady && (
+        <StartupLoadingScreen progress={progress} isFadingOut={isFadingOut} />
+      )}
 
       {/* ─── Sidebar ─── */}
       <aside className="w-[210px] bg-[#101012] border-r border-white/[0.06] flex flex-col justify-between pt-9 pb-3 shrink-0">
@@ -185,7 +235,17 @@ export default function MainApp() {
           <div className="px-5 mb-5 mt-1 drag-region cursor-default">
             <div className="flex items-center gap-2.5 pointer-events-none">
               <AppIcon />
-              <span className="text-[13px] font-semibold text-white tracking-tight">ClefVoice</span>
+              <div>
+                <span className="text-[13px] font-semibold text-white tracking-tight">
+                  {appConfig.name}
+                </span>
+                <p
+                  className="mt-0.5 text-[10px] tabular-nums text-white/35"
+                  aria-label={`App version ${appVersion}`}
+                >
+                  v{appVersion}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -203,11 +263,19 @@ export default function MainApp() {
                 }`}
               >
                 <span className="flex items-center gap-2.5">
-                  <span className={selectedTab === t.id ? "text-white/90" : "text-white/35"}>{t.icon}</span>
+                  <span
+                    className={
+                      selectedTab === t.id ? "text-white/90" : "text-white/35"
+                    }
+                  >
+                    {t.icon}
+                  </span>
                   {t.label}
                 </span>
                 {typeof t.count === "number" && t.count > 0 && (
-                  <span className="text-[10px] tabular-nums text-white/30">{t.count}</span>
+                  <span className="text-[10px] tabular-nums text-white/30">
+                    {t.count}
+                  </span>
                 )}
               </button>
             ))}
@@ -215,11 +283,24 @@ export default function MainApp() {
         </div>
 
         {/* Footer — engine status, minimal */}
-        <div className="px-5 flex items-center gap-2 text-[11px] text-white/35">
-          <span className={`w-[5px] h-[5px] rounded-full ${appStatus === "recording" ? "bg-red-400 animate-pulse" : appStatus === "idle" && !missingPermission ? "bg-emerald-500/80" : "bg-amber-400 animate-pulse"}`} />
-          <span className="truncate" title={footerMessage}>
-            {footerMessage}
-          </span>
+        <div role="status" className="px-5 flex items-center gap-2 text-[11px] text-white/35">
+          <span
+            className={`w-[5px] h-[5px] rounded-full ${appStatus === "recording" ? "bg-red-400 animate-pulse" : appStatus === "idle" && !missingPermission ? "bg-emerald-500/80" : "bg-amber-400 animate-pulse"}`}
+          />
+          {appStatus === "idle" && missingPermission ? (
+            <button
+              type="button"
+              onClick={() => setSelectedTab("preferences")}
+              className="truncate text-left hover:text-white/70 transition-colors"
+              title={`${footerMessage}. Open Preferences to grant access.`}
+            >
+              {footerMessage}
+            </button>
+          ) : (
+            <span className="truncate" title={footerMessage}>
+              {footerMessage}
+            </span>
+          )}
         </div>
       </aside>
 
@@ -230,11 +311,27 @@ export default function MainApp() {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          <div key={selectedTab} className="animate-view px-10 pb-10 max-w-4xl mx-auto w-full">
-            {selectedTab !== "preferences" && (!permissions.microphone || !permissions.accessibility) && (
-              <div role="status" className="mb-5 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-[12px] text-amber-200">
-                {!permissions.microphone ? "Microphone access is needed to record your voice." : "Accessibility access is needed to insert text into other apps."}
-                <button type="button" className="ml-2 underline" onClick={() => setSelectedTab("preferences")}>Review permissions</button>
+          <div
+            key={selectedTab}
+            className={`${selectedTab === "dashboard" ? "" : "animate-view "}px-10 pb-10 max-w-4xl mx-auto w-full`}
+          >
+            {selectedTab !== "preferences" && missingPermission && (
+              <div
+                role="alert"
+                className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2.5 text-[11.5px] text-amber-200"
+              >
+                <span>
+                  {!permissions.microphone
+                    ? "Microphone access is needed to record your voice."
+                    : "Accessibility access is needed to insert text into other apps."}
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 underline underline-offset-2 hover:text-amber-100"
+                  onClick={() => setSelectedTab("preferences")}
+                >
+                  Review permissions
+                </button>
               </div>
             )}
 
@@ -242,7 +339,6 @@ export default function MainApp() {
               <DashboardView
                 history={history}
                 stats={stats}
-                hotkeyLabel={hotkeyLabel}
                 onNavigate={setSelectedTab}
                 onCopy={copyItem}
                 copiedId={copiedId}
@@ -253,6 +349,9 @@ export default function MainApp() {
                 history={history}
                 copiedId={copiedId}
                 onCopy={copyItem}
+                onFavorite={(id, favorite) => {
+                  void api.setHistoryFavorite(id, favorite);
+                }}
                 onDelete={(id) => {
                   const previous = history;
                   setHistory((prev) => prev.filter((h) => h.id !== id));
@@ -284,192 +383,15 @@ export default function MainApp() {
                 permissions={permissions}
                 onSave={saveSettings}
                 onRecheck={() => {
-                  void api.checkPermissions().then((p) => { if (p) setPermissions(p); });
+                  void api.checkPermissions().then((p) => {
+                    if (p) setPermissions(p);
+                  });
                 }}
               />
             )}
           </div>
         </div>
       </main>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────
-// Dashboard
-// ─────────────────────────────────────────────────────────
-
-function DashboardView({
-  history,
-  stats,
-  hotkeyLabel,
-  onNavigate,
-  onCopy,
-  copiedId,
-}: {
-  history: HistoryItem[];
-  stats: import("./types").Stats;
-  hotkeyLabel: string;
-  onNavigate: (tab: TabId) => void;
-  onCopy: (id: string, text: string) => void;
-  copiedId: string | null;
-}) {
-  const [animated, setAnimated] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setAnimated(true), 60);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const typingWpm = 40;
-  const recent = history.slice(0, 3);
-  const weekLabels = ["M", "T", "W", "T", "F", "S", "S"];
-  
-  // Convert 0=Sun, 1=Mon from Swift to 0=Mon, 6=Sun for rendering
-  const swiftToRenderDay = (dayIndex: number) => (dayIndex === 0 ? 6 : dayIndex - 1);
-  const renderedActiveDays = new Set(stats.activeDays.map(swiftToRenderDay));
-
-  const speedScale = Math.max(typingWpm, stats.speechWpm);
-  const typingWidthPercent = Math.round(typingWpm / speedScale * 100);
-  const voiceWidthPercent = Math.round(stats.speechWpm / speedScale * 100);
-
-  return (
-    <div className="space-y-6 animate-view">
-      {/* Speed comparison — the hero visual */}
-      <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
-        <div className="flex items-end justify-between mb-4">
-          <div>
-            <p className="text-[11px] text-white/40 mb-1">Estimated dictation speed</p>
-            <p className="text-[28px] font-semibold text-white tracking-tight leading-none tabular-nums flex items-baseline">
-              {stats.speechWpm}
-              <span className="text-[13px] font-normal text-white/30 ml-1.5">wpm</span>
-            </p>
-          </div>
-          <p className="text-[11px] text-white/40 mb-1 font-medium">
-            {stats.dictationCount ? `${(stats.speechWpm / typingWpm).toFixed(1)}× typing speed` : "No measurements yet"}
-          </p>
-        </div>
-        {/* Animated Power Bars */}
-        <div className="space-y-2.5">
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-medium text-white/45 w-12 text-right shrink-0">Voice</span>
-            <div className="flex-1 h-[7px] rounded-full bg-white/[0.04] overflow-hidden p-[0.5px]">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-500 via-indigo-400 to-sky-300 relative overflow-hidden transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(59,130,246,0.35)]"
-                style={{ width: animated ? `${voiceWidthPercent}%` : "0%" }}
-              >
-                {/* Shimmer light beam effect */}
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-shimmer" />
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-white/35 w-12 text-right shrink-0">Typing</span>
-            <div className="flex-1 h-[7px] rounded-full bg-white/[0.04] overflow-hidden p-[0.5px]">
-              <div
-                className="h-full rounded-full bg-white/20 transition-all duration-1000 delay-200 ease-out"
-                style={{ width: animated ? `${typingWidthPercent}%` : "0%" }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-5">
-        <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] px-4 py-3.5 hover:border-white/[0.08] transition-colors">
-          <p className="text-[10.5px] text-white/35 mb-1">Words dictated</p>
-          <p className="text-[22px] font-semibold text-white tabular-nums tracking-tight leading-none">
-            {stats.totalWords.toLocaleString()}
-          </p>
-          <p className="text-[10px] text-white/20 mt-1.5">
-            {stats.dictationCount} session{stats.dictationCount !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] px-4 py-3.5 hover:border-white/[0.08] transition-colors">
-          <p className="text-[10.5px] text-white/35 mb-1">Time saved</p>
-          <p className="text-[22px] font-semibold text-white tabular-nums tracking-tight leading-none">
-            {stats.minutesSaved > 0 ? stats.minutesSaved : 0}
-            <span className="text-[13px] font-normal text-white/30 ml-1">min</span>
-          </p>
-          <p className="text-[10px] text-white/20 mt-1.5">vs keyboard input</p>
-        </div>
-        <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] px-4 py-3.5 hover:border-white/[0.08] transition-colors">
-          <p className="text-[10.5px] text-white/35 mb-1">Last 7 days</p>
-          <div className="flex gap-[3px] mt-2">
-            {weekLabels.map((lbl, i) => {
-              const active = renderedActiveDays.has(i);
-              return (
-                <span
-                  key={i}
-                  className={`w-[22px] h-[22px] rounded-[5px] flex items-center justify-center text-[9.5px] font-medium leading-none transition-all duration-300 ${
-                    animated ? "scale-100 opacity-100" : "scale-75 opacity-0"
-                  } ${
-                    active
-                      ? "bg-white/[0.16] text-white shadow-[0_1px_4px_rgba(255,255,255,0.1)]"
-                      : "bg-white/[0.04] text-white/20"
-                  }`}
-                  style={{ transitionDelay: `${i * 40}ms` }}
-                >
-                  {lbl}
-                </span>
-              );
-            })}
-          </div>
-          <p className="text-[10px] text-white/20 mt-1.5">
-            {renderedActiveDays.size} day{renderedActiveDays.size !== 1 ? "s" : ""} active
-          </p>
-        </div>
-      </div>
-
-      {/* Recent dictations */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[12px] text-white/40">Recent</p>
-          {history.length > 3 && (
-            <button
-              type="button"
-              onClick={() => onNavigate("history")}
-              className="text-[11px] text-white/35 hover:text-white/70 transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              All {history.length} <ArrowRight size={11} />
-            </button>
-          )}
-        </div>
-
-        {recent.length === 0 ? (
-          <div className="py-8 text-center border border-dashed border-white/[0.06] rounded-xl bg-white/[0.01]">
-            <p className="text-[12px] text-white/35">
-              No dictations yet. Hold <kbd className="font-mono text-white/70 bg-white/[0.08] px-1.5 py-0.5 rounded text-[11px] font-medium">{hotkeyLabel.replace(/\s*\(Hold to talk\)/, "")}</kbd> to dictate anywhere.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {recent.map((item) => (
-              <div
-                key={item.id}
-                className="group rounded-lg px-3 py-2.5 -mx-3 hover:bg-white/[0.03] transition-colors"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <p className="text-[12.5px] text-white/80 leading-relaxed select-text flex-1 line-clamp-2">
-                    {item.text}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => onCopy(item.id, item.text)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-white/40 hover:text-white shrink-0 mt-0.5 cursor-pointer"
-                  >
-                    {copiedId === item.id ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                  </button>
-                </div>
-                <p className="text-[10.5px] text-white/25 mt-1 tabular-nums">
-                  {item.timestamp} · {item.wordCount} words {item.wpm ? `· ${Math.round(item.wpm)} wpm` : ""}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -484,33 +406,49 @@ function HistoryView({
   onCopy,
   onDelete,
   onClear,
+  onFavorite,
 }: {
   history: HistoryItem[];
   copiedId: string | null;
   onCopy: (id: string, text: string) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
+  onFavorite: (id: string, favorite: boolean) => void;
 }) {
   const [q, setQ] = useState("");
-  const filtered = history.filter((i) => i.text.toLowerCase().includes(q.toLowerCase()));
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const filtered = filterHistory(history, q, favoritesOnly);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30"
+          />
           <input
             type="text"
-            placeholder="Search…"
+            placeholder="Search Thai or English words…"
+            aria-label="Search history"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="w-full bg-white/[0.04] border border-white/[0.06] rounded-lg pl-8 pr-3 py-1.5 text-[12px] text-white/90 placeholder:text-white/25 outline-none focus:border-white/15 transition-colors"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => setFavoritesOnly(!favoritesOnly)}
+          aria-pressed={favoritesOnly}
+          className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] ${favoritesOnly ? "bg-amber-400/10 text-amber-300" : "text-white/40 hover:text-white/70"}`}
+        >
+          <Star size={12} /> Favorites
+        </button>
         {history.length > 0 && (
           <button
             type="button"
             onClick={onClear}
+            title="Clear all saved transcripts, including favorites"
             className="text-[11px] text-white/30 hover:text-red-400 transition-colors cursor-pointer flex items-center gap-1"
           >
             <Trash2 size={12} /> Clear
@@ -520,7 +458,11 @@ function HistoryView({
 
       {filtered.length === 0 ? (
         <p className="py-12 text-center text-white/25 text-[12px]">
-          {q ? `No results for "${q}"` : "No transcriptions yet"}
+          {q.trim()
+            ? `No results for "${q.trim()}"`
+            : favoritesOnly
+              ? "No favorites yet. Star a transcript to find it here."
+              : "No transcriptions yet"}
         </p>
       ) : (
         <div className="space-y-1">
@@ -533,16 +475,36 @@ function HistoryView({
                 <p className="text-[12.5px] text-white/80 leading-relaxed select-text flex-1">
                   {item.text}
                 </p>
+                <button
+                  type="button"
+                  aria-label={
+                    item.favorite ? "Remove from favorites" : "Add to favorites"
+                  }
+                  aria-pressed={Boolean(item.favorite)}
+                  onClick={() => onFavorite(item.id, !item.favorite)}
+                  className={`shrink-0 mt-0.5 ${item.favorite ? "text-amber-300" : "text-white/30 hover:text-amber-300"}`}
+                >
+                  <Star
+                    size={13}
+                    fill={item.favorite ? "currentColor" : "none"}
+                  />
+                </button>
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
                   <button
                     type="button"
+                    aria-label="Copy transcript"
                     onClick={() => onCopy(item.id, item.text)}
                     className="text-white/40 hover:text-white cursor-pointer"
                   >
-                    {copiedId === item.id ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    {copiedId === item.id ? (
+                      <Check size={13} className="text-emerald-400" />
+                    ) : (
+                      <Copy size={13} />
+                    )}
                   </button>
                   <button
                     type="button"
+                    aria-label="Delete transcript"
                     onClick={() => onDelete(item.id)}
                     className="text-white/30 hover:text-red-400 cursor-pointer"
                   >
@@ -551,7 +513,13 @@ function HistoryView({
                 </div>
               </div>
               <p className="text-[10.5px] text-white/25 mt-1.5 tabular-nums">
-                {item.timestamp} · {item.wordCount} words · {item.charCount} chars {item.wpm ? `· ${Math.round(item.wpm)} wpm` : ""}
+                {historyTimestamp(item)} · {item.wordCount} words ·{" "}
+                {item.charCount} chars{" "}
+                {item.wpm ? `· ${Math.round(item.wpm)} wpm` : ""}
+                {item.model ? ` · ${item.model}` : ""}
+                {item.processingSeconds != null
+                  ? ` · ${formatProcessingTime(item.processingSeconds)} to transcript`
+                  : ""}
               </p>
             </div>
           ))}
@@ -586,54 +554,82 @@ function VocabularyView({
       {/* Custom words */}
       <section>
         <SectionHead>Custom Words</SectionHead>
-        <p className="text-[11.5px] text-white/35 mb-3 leading-relaxed">
-          Give Whisper spelling hints for names and technical terms, including Thai words. This may improve recognition, but does not guarantee exact spelling.
-        </p>
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            placeholder="e.g. Kubernetes, ClefVoice, ขมิ้น"
-            value={word}
-            onChange={(e) => setWord(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addWord()}
-            className="flex-1 bg-white/[0.04] border border-white/[0.07] rounded-lg px-3 py-1.5 text-[12px] text-white/90 placeholder:text-white/25 outline-none focus:border-white/15 transition-colors"
-          />
-          <button
-            type="button"
-            onClick={addWord}
-            disabled={!word.trim()}
-            className="px-3 py-1.5 rounded-lg bg-white/[0.07] hover:bg-white/[0.12] disabled:opacity-25 text-white/85 text-[12px] font-medium transition-colors cursor-pointer"
-          >
-            Add
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {settings.customVocabulary.map((w) => (
-            <span key={w} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-md bg-white/[0.05] text-[11.5px] text-white/75">
-              {w}
+        <SettingsGroup>
+          <div className="py-4">
+            <p className="text-[11.5px] text-white/35 mb-3 leading-relaxed">
+              Give Whisper spelling hints for names and technical terms, including
+              Thai words. This may improve recognition, but does not guarantee exact
+              spelling.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                aria-label="Custom word"
+                placeholder="e.g. Kubernetes, ClefVoice, ขมิ้น"
+                value={word}
+                onChange={(e) => setWord(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addWord()}
+                className="flex-1 bg-white/[0.04] border border-white/[0.07] rounded-lg px-3 py-1.5 text-[12px] text-white/90 placeholder:text-white/25 outline-none focus:border-white/15 transition-colors"
+              />
               <button
                 type="button"
-                onClick={() => onSave({ customVocabulary: settings.customVocabulary.filter((v) => v !== w) })}
-                className="text-white/30 hover:text-white/70 cursor-pointer p-0.5"
+                onClick={addWord}
+                disabled={!word.trim()}
+                className="px-3 py-1.5 rounded-lg bg-white/[0.07] hover:bg-white/[0.12] disabled:opacity-25 text-white/85 text-[12px] font-medium transition-colors cursor-pointer"
               >
-                <X size={11} />
+                Add
               </button>
-            </span>
-          ))}
-        </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {settings.customVocabulary.map((w) => (
+                <span
+                  key={w}
+                  className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-md bg-white/[0.05] text-[11.5px] text-white/75"
+                >
+                  {w}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${w}`}
+                    onClick={() =>
+                      onSave({
+                        customVocabulary: settings.customVocabulary.filter(
+                          (v) => v !== w,
+                        ),
+                      })
+                    }
+                    className="text-white/30 hover:text-white/70 cursor-pointer p-0.5"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        </SettingsGroup>
       </section>
 
       {/* Post-processing */}
       <section>
         <SectionHead>Post-processing</SectionHead>
-        <div className="space-y-0">
+        <SettingsGroup>
           <Row label="Remove filler words" sub="uh, um, เอ่อ, อ๋อ, แบบว่า">
-            <Toggle checked={settings.removeFillerWords} onChange={(v) => onSave({ removeFillerWords: v })} />
+            <Toggle
+              label="Remove filler words"
+              checked={settings.removeFillerWords}
+              onChange={(v) => onSave({ removeFillerWords: v })}
+            />
           </Row>
-          <Row label="Auto-capitalize" sub="Capitalize the first letter of each sentence">
-            <Toggle checked={settings.autoCapitalize} onChange={(v) => onSave({ autoCapitalize: v })} />
+          <Row
+            label="Auto-capitalize"
+            sub="Capitalize the first letter of each sentence"
+          >
+            <Toggle
+              label="Auto-capitalize"
+              checked={settings.autoCapitalize}
+              onChange={(v) => onSave({ autoCapitalize: v })}
+            />
           </Row>
-        </div>
+        </SettingsGroup>
       </section>
     </div>
   );
@@ -650,43 +646,81 @@ function VoiceAudioView({
   settings: Settings;
   onSave: (p: Partial<Settings>) => void;
 }) {
+  const presets = [
+    appConfig.vadLevels.high,
+    appConfig.vadLevels.normal,
+    appConfig.vadLevels.low,
+  ] as const;
+  const sensitivity = audioOptionValue(
+    settings.vadThreshold ?? appConfig.defaultVadThreshold,
+    presets,
+  );
+  const pause = audioOptionValue(
+    settings.autoStopSeconds,
+    [0.6, 0.9, 1.2, 1.5],
+  );
+  const sensitivityOptions = [
+    { value: String(appConfig.vadLevels.high), label: "High" },
+    { value: String(appConfig.vadLevels.normal), label: "Normal" },
+    { value: String(appConfig.vadLevels.low), label: "Low" },
+  ];
+  const pauseOptions = [0.6, 0.9, 1.2, 1.5].map((seconds) => ({
+    value: String(seconds),
+    label: `${seconds}s`,
+  }));
+  if (!sensitivityOptions.some((option) => option.value === sensitivity)) {
+    sensitivityOptions.push({
+      value: sensitivity,
+      label: `Custom (${sensitivity})`,
+    });
+  }
+  if (!pauseOptions.some((option) => option.value === pause)) {
+    pauseOptions.push({ value: pause, label: `Custom (${pause}s)` });
+  }
   return (
     <div className="space-y-8">
       <section>
         <SectionHead>Voice Activity Detection</SectionHead>
-        <div className="space-y-0">
-          <Row label="Silence trimming" sub="Strip silence before and after speech">
-            <Toggle checked={settings.vadEnabled} onChange={(v) => onSave({ vadEnabled: v })} />
+        <SettingsGroup>
+          <Row
+            label="Silence trimming"
+            sub="Strip silence before and after speech"
+          >
+            <Toggle
+              label="Silence trimming"
+              checked={settings.vadEnabled}
+              onChange={(v) => onSave({ vadEnabled: v })}
+            />
           </Row>
           <Row label="Sensitivity" sub="Energy threshold for voice detection">
             <Dropdown
-              value={String(settings.vadThreshold ?? 0.012)}
+              label="Sensitivity"
+              value={sensitivity}
               onChange={(v) => onSave({ vadThreshold: Number(v) })}
-              options={[
-                { value: "0.005", label: "High" },
-                { value: "0.012", label: "Normal" },
-                { value: "0.025", label: "Low" },
-              ]}
+              options={sensitivityOptions}
             />
           </Row>
           <Row label="Auto-stop" sub="End dictation after silence">
-            <Toggle checked={settings.autoStopEnabled} onChange={(v) => onSave({ autoStopEnabled: v })} />
+            <Toggle
+              label="Auto-stop"
+              checked={settings.autoStopEnabled}
+              onChange={(v) => onSave({ autoStopEnabled: v })}
+            />
           </Row>
           {settings.autoStopEnabled && (
-            <Row label="Pause duration" sub="Seconds of silence before stopping">
+            <Row
+              label="Pause duration"
+              sub="Seconds of silence before stopping"
+            >
               <Dropdown
-                value={String(settings.autoStopSeconds)}
+                label="Pause duration"
+                value={pause}
                 onChange={(v) => onSave({ autoStopSeconds: Number(v) })}
-                options={[
-                  { value: "0.6", label: "0.6s" },
-                  { value: "0.9", label: "0.9s" },
-                  { value: "1.2", label: "1.2s" },
-                  { value: "1.5", label: "1.5s" },
-                ]}
+                options={pauseOptions}
               />
             </Row>
           )}
-        </div>
+        </SettingsGroup>
       </section>
     </div>
   );
@@ -714,16 +748,22 @@ function PreferencesView({
   onRecheck: () => void;
 }) {
   const modelStatus = useAppStore((s) => s.status);
-  const modelMessage = useAppStore((s) => s.message);
-  const modelProgress = useAppStore((s) => s.progress);
-  const modelBusy = ["loading", "downloading", "recording", "transcribing"].includes(modelStatus);
+  const modelBusy = [
+    "loading",
+    "downloading",
+    "recording",
+    "transcribing",
+  ].includes(modelStatus);
   const [langOpen, setLangOpen] = useState(false);
 
   const langLabel = () => {
     const list = settings.selectedLanguages ?? [];
     if (list.length === 0) return "Auto";
     const matched = languages.filter((l) => list.includes(l.code));
-    if (matched.length <= 2) return matched.map((l) => l.name.replace(/\s*\(.*?\)/, "").trim()).join(", ");
+    if (matched.length <= 2)
+      return matched
+        .map((l) => l.name.replace(/\s*\(.*?\)/, "").trim())
+        .join(", ");
     return `${matched.length} languages`;
   };
 
@@ -741,60 +781,81 @@ function PreferencesView({
             <RefreshCw size={11} /> Check
           </button>
         </div>
-        <div className="space-y-0">
-          <Row label="Accessibility" sub="Use the hotkey and paste text into apps">
-            <PermBadge granted={permissions.accessibility} onRequest={() => void api.requestAccessibility()} />
+        <SettingsGroup>
+          <Row
+            label="Accessibility"
+            sub="Use the hotkey and paste text into apps"
+          >
+            <PermBadge
+              granted={permissions.accessibility}
+              onRequest={() => void api.requestAccessibility()}
+            />
           </Row>
           <Row label="Microphone" sub="Capture audio for local processing">
-            <PermBadge granted={permissions.microphone} onRequest={() => void api.requestMicrophone()} />
+            <PermBadge
+              granted={permissions.microphone}
+              onRequest={() => void api.requestMicrophone()}
+            />
           </Row>
-          <Row label="Input Monitoring" sub="Optional backup for hotkeys if Accessibility alone is insufficient">
-            <PermBadge granted={permissions.inputMonitoring} onRequest={() => void api.requestInputMonitoring()} />
+          <Row
+            label="Input Monitoring"
+            sub="Optional backup for hotkeys if Accessibility alone is insufficient"
+          >
+            <PermBadge
+              granted={permissions.inputMonitoring}
+              onRequest={() => void api.requestInputMonitoring()}
+            />
           </Row>
-        </div>
+        </SettingsGroup>
       </section>
 
       {/* Engine */}
       <section>
         <SectionHead>Engine</SectionHead>
-        <div className="space-y-0">
+        <SettingsGroup>
           <Row label="Hotkey" sub="Hold to speak, release to transcribe">
             <Dropdown
+              label="Dictation hotkey"
               value={settings.hotkey}
               onChange={(v) => onSave({ hotkey: v })}
               options={hotkeys.map((h) => ({ value: h.value, label: h.label }))}
             />
           </Row>
-          <Row label="Model" sub="Larger models are slower but more accurate">
-            <div className="flex rounded-md bg-white/[0.04] p-[2px]">
-              {modelSizes.map((m) => (
-                <button
-                  key={m.value}
-                  type="button"
-                  disabled={modelBusy}
-                  onClick={() => { void api.loadModel(m.value); }}
-                  className={`px-2.5 py-[3px] rounded text-[11px] capitalize cursor-pointer disabled:opacity-40 disabled:cursor-wait transition-colors ${
-                    settings.modelSize === m.value
-                      ? "bg-white/[0.12] text-white font-medium"
-                      : "text-white/40 hover:text-white/70"
-                  }`}
-                >
-                  {m.value === "tiny" ? "Tiny" : m.value === "base" ? "Base" : m.value === "small" ? "Small" : "Large"}
-                </button>
-              ))}
+          <div className="border-b border-white/[0.04] py-3">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-[12.5px] text-white/85">Model</p>
+              <Dropdown
+                label="Whisper model"
+                value={settings.modelSize}
+                disabled={modelBusy}
+                onChange={(value) => void api.loadModel(value)}
+                options={modelSizes}
+                wide
+              />
             </div>
-          </Row>
-          <div role="status" className="py-2 text-[11px] text-white/60 break-words">
-            {modelMessage}{modelStatus === "downloading" ? ` ${Math.round(modelProgress * 100)}%` : ""}
+            {modelDescriptions[settings.modelSize] && (
+              <p className="mt-2 max-w-[480px] text-[11px] text-white/40 leading-relaxed">
+                {modelDescriptions[settings.modelSize]}
+              </p>
+            )}
             {modelStatus === "error" && (
-              <button type="button" onClick={() => void api.loadModel(settings.modelSize)} className="ml-2 underline text-white">
+              <button
+                type="button"
+                onClick={() => void api.loadModel(settings.modelSize)}
+                className="mt-2 text-[11px] text-white/70 underline hover:text-white"
+              >
                 Retry model
               </button>
             )}
           </div>
-          <Row label="Languages" sub="Speech recognition target">
+          <Row
+            label="Languages"
+            sub="One language is fixed; multiple selections use automatic detection"
+          >
             <button
               type="button"
+              aria-label="Transcription languages"
+              aria-haspopup="dialog"
               onClick={() => setLangOpen(true)}
               className="bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.07] rounded-lg px-3 py-1 text-[11.5px] text-white/80 flex items-center gap-1.5 cursor-pointer transition-colors"
             >
@@ -802,7 +863,7 @@ function PreferencesView({
               <ChevronDown size={12} className="text-white/35" />
             </button>
           </Row>
-        </div>
+        </SettingsGroup>
       </section>
 
       <LanguageModal
@@ -816,7 +877,13 @@ function PreferencesView({
   );
 }
 
-function PermBadge({ granted, onRequest }: { granted: boolean; onRequest: () => void }) {
+function PermBadge({
+  granted,
+  onRequest,
+}: {
+  granted: boolean;
+  onRequest: () => void;
+}) {
   if (granted) {
     return (
       <span className="flex items-center gap-1 text-[11px] text-emerald-400/90 font-medium">
@@ -857,7 +924,9 @@ function LanguageModal({
 
   const isAuto = selectedCodes.length === 0;
   const filtered = languages.filter(
-    (l) => l.name.toLowerCase().includes(q.toLowerCase()) || l.code.toLowerCase().includes(q.toLowerCase()),
+    (l) =>
+      l.name.toLowerCase().includes(q.toLowerCase()) ||
+      l.code.toLowerCase().includes(q.toLowerCase()),
   );
 
   const toggle = (code: string) => {
@@ -878,10 +947,16 @@ function LanguageModal({
           <div>
             <p className="text-[13px] font-medium text-white/90">Languages</p>
             <p className="text-[10.5px] text-white/35 mt-0.5">
-              {isAuto ? "Auto-detecting all" : `${selectedCodes.length} selected`}
+              {isAuto
+                ? "Auto-detecting all"
+                : `${selectedCodes.length} selected`}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-white/35 hover:text-white/70 cursor-pointer p-1 transition-colors">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-white/35 hover:text-white/70 cursor-pointer p-1 transition-colors"
+          >
             <X size={14} />
           </button>
         </div>
@@ -889,7 +964,10 @@ function LanguageModal({
         {/* Search */}
         <div className="px-3 py-2 border-b border-white/[0.05]">
           <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30"
+            />
             <input
               type="text"
               placeholder="Search…"
@@ -920,17 +998,25 @@ function LanguageModal({
             />
           ))}
           {filtered.length === 0 && q && (
-            <p className="py-6 text-center text-[11px] text-white/25">No results</p>
+            <p className="py-6 text-center text-[11px] text-white/25">
+              No results
+            </p>
           )}
         </div>
 
         {/* Foot */}
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06]">
           {!isAuto ? (
-            <button type="button" onClick={() => onSave([])} className="text-[11px] text-white/30 hover:text-white/60 cursor-pointer transition-colors">
+            <button
+              type="button"
+              onClick={() => onSave([])}
+              className="text-[11px] text-white/30 hover:text-white/60 cursor-pointer transition-colors"
+            >
               Reset to Auto
             </button>
-          ) : <div />}
+          ) : (
+            <div />
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -946,24 +1032,36 @@ function LanguageModal({
   return createPortal(modalEl, document.body);
 }
 
-function LangRow({ label, sub, checked, onClick }: {
-  label: string; sub?: string; checked: boolean; onClick: () => void;
+function LangRow({
+  label,
+  sub,
+  checked,
+  onClick,
+}: {
+  label: string;
+  sub?: string;
+  checked: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`w-full flex items-center justify-between px-3 py-1.5 rounded-md text-[11.5px] text-left transition-colors cursor-pointer ${
-        checked ? "bg-white/[0.07] text-white" : "text-white/60 hover:bg-white/[0.03]"
+        checked
+          ? "bg-white/[0.07] text-white"
+          : "text-white/60 hover:bg-white/[0.03]"
       }`}
     >
       <span className="truncate">
         {label}
         {sub && <span className="text-white/30 ml-1.5">{sub}</span>}
       </span>
-      <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
-        checked ? "bg-white/90 border-white/90 text-black" : "border-white/15"
-      }`}>
+      <span
+        className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+          checked ? "bg-white/90 border-white/90 text-black" : "border-white/15"
+        }`}
+      >
         {checked && <Check size={10} strokeWidth={3} />}
       </span>
     </button>
@@ -974,23 +1072,43 @@ function LangRow({ label, sub, checked, onClick }: {
 // Shared Primitives
 // ─────────────────────────────────────────────────────────
 
-function SectionHead({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function SectionHead({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <h3 className={`text-[11.5px] font-medium text-white/45 mb-2 ${className}`}>{children}</h3>
+    <h3 className={`text-[11.5px] font-medium text-white/45 mb-2 ${className}`}>
+      {children}
+    </h3>
+  );
+}
+
+function SettingsGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-4">
+      {children}
+    </div>
   );
 }
 
 function AppIcon() {
   return (
-    <div className="w-[22px] h-[22px] rounded-[5px] bg-white/[0.08] flex items-center justify-center shrink-0">
-      <AppIconSvg className="w-3.5 h-3.5" />
+    <div className="w-9 h-9 rounded-lg bg-white/[0.08] flex items-center justify-center shrink-0">
+      <AppIconSvg className="w-6 h-6" />
     </div>
   );
 }
 
 function AppIconSvg({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 1024 1024" className={className || "w-3.5 h-3.5"} xmlns="http://www.w3.org/2000/svg">
+    <svg
+      viewBox="0 0 1024 1024"
+      className={className || "w-3.5 h-3.5"}
+      xmlns="http://www.w3.org/2000/svg"
+    >
       <path
         d="M0 0 C1.02867187 0.89138672 1.02867187 0.89138672 2.078125 1.80078125 C2.82578125 2.40535156 3.5734375 3.00992188 4.34375 3.6328125 C22.25029465 18.58538635 31.84356613 42.04060459 34.078125 64.80078125 C34.35825116 69.89699178 34.36754845 74.99392776 34.33886719 80.09643555 C34.32811832 82.36469124 34.33884847 84.63215825 34.3515625 86.90039062 C34.36353865 98.57412593 33.06337439 109.66116013 30.140625 120.98828125 C29.82222656 122.23996094 29.50382812 123.49164063 29.17578125 124.78125 C27.00922523 132.84323105 24.51179136 140.68040727 21.390625 148.42578125 C21.04249756 149.29041992 20.69437012 150.15505859 20.33569336 151.04589844 C17.00190564 159.19332477 13.22504562 167.03950016 9.078125 174.80078125 C8.55847168 175.78208008 8.55847168 175.78208008 8.02832031 176.78320312 C-2.72609983 196.95389049 -16.44658782 215.52020234 -31.359375 232.8046875 C-33.67280913 235.50957161 -35.89649555 238.26372664 -38.109375 241.05078125 C-44.00456656 248.29344517 -50.52054934 254.96310332 -56.95654297 261.72216797 C-58.68230003 263.54739723 -60.38829679 265.38730055 -62.08203125 267.2421875 C-71.42080091 277.44846874 -81.23109161 287.17405403 -91.06152344 296.90356445 C-99.04224883 304.81054225 -99.04224883 304.81054225 -106.52563477 313.18579102 C-108.07779888 314.98113384 -109.72769136 316.63956604 -111.421875 318.30078125 C-115.13417753 321.96391421 -118.52646854 325.8448428 -121.921875 329.80078125 C-122.80542155 330.80909178 -123.68958266 331.81686399 -124.57421875 332.82421875 C-131.861906 341.16749055 -138.66519216 349.81274416 -145.31494141 358.67041016 C-146.88291528 360.74913091 -148.46799686 362.8135585 -150.05859375 364.875 C-156.48850802 373.25095731 -162.3208221 381.83622225 -167.76464844 390.88330078 C-168.85876643 392.69621274 -169.96941855 394.49769903 -171.0859375 396.296875 C-184.45136909 417.98486857 -196.44830707 440.60366842 -204.53515625 464.80859375 C-205.53838669 467.79050099 -206.68028851 470.68894166 -207.87890625 473.59765625 C-213.8806277 488.4670024 -217.24586342 504.34014133 -220.234375 520.05078125 C-220.47655762 521.30262207 -220.71874023 522.55446289 -220.96826172 523.84423828 C-224.13941174 541.19045129 -225.26303847 558.52478196 -225.18261719 576.14013672 C-225.1718503 578.9321854 -225.18262367 581.72359489 -225.1953125 584.515625 C-225.21418657 608.748206 -221.54066446 632.27358557 -215.921875 655.80078125 C-215.64980225 656.98438232 -215.37772949 658.1679834 -215.09741211 659.38745117 C-212.87250725 668.86016547 -209.9504624 677.80825231 -206.359375 686.86328125 C-206.09931671 687.52621185 -205.83925842 688.18914246 -205.57131958 688.87216187 C-187.79036651 734.11772808 -159.68904187 782.21292579 -113.921875 803.80078125 C-107.05801292 806.48278549 -100.26626589 808.22475059 -92.921875 808.80078125 C-94.22898437 808.23423828 -94.22898437 808.23423828 -95.5625 807.65625 C-111.1513647 800.45230495 -122.88772909 789.32080937 -129.9765625 773.4765625 C-133.59613819 763.23106933 -133.88679153 748.36345401 -129.921875 738.23828125 C-121.85404122 722.21560856 -110.40472535 713.07649556 -93.69140625 706.98828125 C-83.7807209 704.22785825 -70.64505027 704.53134228 -60.921875 707.80078125 C-59.90738281 708.13078125 -58.89289063 708.46078125 -57.84765625 708.80078125 C-41.42186587 714.60036345 -29.71378825 725.21695476 -21.921875 740.80078125 C-20.17288853 745.35170333 -18.98410582 750.04774842 -17.921875 754.80078125 C-17.72980469 755.62578125 -17.53773438 756.45078125 -17.33984375 757.30078125 C-14.36060262 775.12054127 -20.4768281 793.79726997 -29.921875 808.80078125 C-32.42771205 812.28649755 -35.10006676 815.56711145 -37.921875 818.80078125 C-38.44136719 819.41566406 -38.96085937 820.03054688 -39.49609375 820.6640625 C-47.51058536 829.44568429 -59.03726958 835.39384345 -69.921875 839.80078125 C-70.70691406 840.13980469 -71.49195313 840.47882812 -72.30078125 840.828125 C-98.11291601 850.40669662 -128.22860858 844.8539845 -152.5769043 833.92919922 C-171.22737032 825.25505467 -188.30901313 813.12286709 -203.921875 799.80078125 C-205.06470134 798.84326901 -206.20795576 797.88626754 -207.3515625 796.9296875 C-214.56579429 790.8600307 -221.35844874 784.57555218 -227.921875 777.80078125 C-230.42896982 775.27769221 -232.95035086 772.773082 -235.5 770.29296875 C-241.79111362 764.13062061 -247.50080026 757.75710436 -252.921875 750.80078125 C-253.41445801 750.17397461 -253.90704102 749.54716797 -254.41455078 748.90136719 C-279.81812503 716.51895888 -299.68292758 680.55965056 -310.921875 640.80078125 C-311.1276416 640.09099121 -311.3334082 639.38120117 -311.54541016 638.64990234 C-322.64035412 600.1153086 -325.50404747 558.55662071 -319.671875 518.86328125 C-319.56954559 518.16159821 -319.46721619 517.45991516 -319.36178589 516.73696899 C-317.84195407 506.5858121 -315.57099309 496.70895714 -312.921875 486.80078125 C-312.65842285 485.81247314 -312.3949707 484.82416504 -312.12353516 483.8059082 C-298.8275119 435.35780754 -272.14948864 392.82459631 -239.921875 354.80078125 C-239.36081055 354.13530273 -238.79974609 353.46982422 -238.22167969 352.78417969 C-231.88092499 345.28052395 -225.37409169 338.09642801 -218.3515625 331.2265625 C-215.59558791 328.47501874 -213.06062707 325.58730682 -210.52734375 322.6328125 C-206.07413708 317.55117277 -201.13554788 313.08514052 -196.0234375 308.68359375 C-193.73522389 306.63355851 -191.57926918 304.48783033 -189.421875 302.30078125 C-185.41436789 298.25245064 -181.25523437 294.49431575 -176.921875 290.80078125 C-175.42914063 289.50914062 -175.42914063 289.50914062 -173.90625 288.19140625 C-167.24912274 282.43827338 -160.52098299 276.77562039 -153.734375 271.17578125 C-153.00355713 270.5717749 -152.27273926 269.96776855 -151.51977539 269.34545898 C-150.83391357 268.78157471 -150.14805176 268.21769043 -149.44140625 267.63671875 C-148.83401611 267.1370459 -148.22662598 266.63737305 -147.60083008 266.12255859 C-146.09794599 264.93939523 -144.51336258 263.86177297 -142.921875 262.80078125 C-142.34401506 257.02218185 -143.5815797 251.57515235 -144.734375 245.92578125 C-145.10478291 244.03527689 -145.47456773 242.14465034 -145.84375 240.25390625 C-146.34744779 237.70360483 -146.85196449 235.15346882 -147.35742188 232.60351562 C-153.89290666 199.21076499 -155.5781106 164.74934732 -154.921875 130.80078125 C-154.90785645 129.9200293 -154.89383789 129.03927734 -154.87939453 128.13183594 C-154.0303507 85.64463215 -140.45823201 44.54199067 -111.921875 12.80078125 C-111.06722656 11.82044922 -111.06722656 11.82044922 -110.1953125 10.8203125 C-82.23040921 -19.36744207 -32.65146575 -27.27002047 0 0 Z"
         fill="#fff"
@@ -1028,7 +1146,9 @@ function StartupLoadingScreen({
 
         {/* Title */}
         <div className="text-center">
-          <h1 className="text-[14.5px] font-semibold tracking-tight text-white/90">ClefVoice</h1>
+          <h1 className="text-[14.5px] font-semibold tracking-tight text-white/90">
+            {appConfig.name}
+          </h1>
         </div>
 
         {/* Minimal Progress Bar */}
@@ -1043,23 +1163,42 @@ function StartupLoadingScreen({
   );
 }
 
-function Row({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+function Row({
+  label,
+  sub,
+  children,
+}: {
+  label: string;
+  sub?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-white/[0.04] last:border-0 gap-4">
       <div className="min-w-0 flex-1">
         <p className="text-[12.5px] text-white/85">{label}</p>
-        {sub && <p className="text-[11px] text-white/30 mt-0.5 truncate">{sub}</p>}
+        {sub && (
+          <p className="text-[11px] text-white/30 mt-0.5 truncate">{sub}</p>
+        )}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
   );
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+}) {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={label}
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={`relative w-[30px] h-[18px] rounded-full transition-colors cursor-pointer ${
@@ -1075,19 +1214,33 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function Dropdown({ value, onChange, options }: {
+function Dropdown({
+  value,
+  onChange,
+  options,
+  label,
+  disabled = false,
+  wide = false,
+}: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  label?: string;
+  disabled?: boolean;
+  wide?: boolean;
 }) {
   return (
     <select
+      aria-label={label}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-white/[0.04] border border-white/[0.07] rounded-lg px-2.5 py-1 text-[11.5px] text-white/80 outline-none cursor-pointer transition-colors hover:border-white/15 max-w-[160px]"
+      className={`bg-white/[0.04] border border-white/[0.07] rounded-lg px-2.5 py-1 text-[11.5px] text-white/80 outline-none cursor-pointer transition-colors hover:border-white/15 focus-visible:border-white/30 disabled:opacity-40 disabled:cursor-not-allowed ${wide ? "max-w-[260px]" : "max-w-[160px]"}`}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
       ))}
     </select>
   );

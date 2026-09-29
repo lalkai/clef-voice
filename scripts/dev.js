@@ -2,6 +2,9 @@
 
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { readFileSync } from "node:fs";
+
+const { name: appName } = JSON.parse(readFileSync(new URL("../app.config.json", import.meta.url), "utf8"));
 
 if (process.platform !== "darwin") {
   console.error("❌ ClefVoice currently supports macOS only");
@@ -22,6 +25,6 @@ build.on("exit", (code) => {
   }
 
   console.log("🍏 Launching ClefVoice.app...");
-  const app = spawn("open", ["native/macos/ClefVoice.app"], { stdio: "inherit" });
+  const app = spawn("open", ["native/macos/" + appName + ".app"], { stdio: "inherit" });
   app.on("exit", () => process.exit(0));
 });

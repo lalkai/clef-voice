@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/clefvoice/core/internal/capture"
 	"github.com/clefvoice/core/internal/config"
@@ -68,9 +69,13 @@ type Engine struct {
 	loadWG       sync.WaitGroup
 	loadCh       chan loadMsg
 
-	transcribing      bool
-	transcribeSamples int
-	transcribeCh      chan transcribeMsg
+	transcribing        bool
+	transcribeSamples   int
+	transcribeCh        chan transcribeMsg
+	transcribeStarted   time.Time
+	transcribeModel     string
+	transcribeLanguages []string
+	transcribePost      *postprocess.Processor
 }
 
 // New creates an Engine with the given model directory override.
@@ -150,6 +155,11 @@ func (e *Engine) Handle(cmd protocol.Command) bool {
 		e.emit.Stats(e.hist.GetStats())
 	case protocol.CmdShutdown:
 		return true
+	case protocol.CmdSetHistoryFavorite:
+		if err := e.hist.SetFavorite(cmd.ID, cmd.Favorite); err != nil {
+			e.emit.Error("Could not update favorite: " + err.Error())
+		}
+		e.emit.History(e.hist.GetHistory())
 	}
 	return false
 }
@@ -303,6 +313,7 @@ func (e *Engine) StopRecording() {
 		return
 	}
 	e.recording = false
+	e.transcribeStarted = time.Now()
 
 	if s := e.capture; s != nil {
 		// Stop the producer before draining so the final audio chunk is retained.
@@ -353,6 +364,9 @@ func (e *Engine) StopRecording() {
 
 	filtered := noise.Process(samples)
 	codes := append([]string(nil), e.cfg.Languages...)
+	e.transcribeLanguages = codes
+	e.transcribeModel = e.cfg.Model
+	e.transcribePost = e.post
 	var prompt string
 	if len(e.cfg.CustomVocabulary) > 0 {
 		prompt = strings.Join(e.cfg.CustomVocabulary, ", ")
@@ -437,7 +451,11 @@ func (e *Engine) PollTranscribe() {
 }
 
 func (e *Engine) finalize(text string) {
-	finalText := e.post.Process(text)
+	processor := e.transcribePost
+	if processor == nil {
+		processor = e.post
+	}
+	finalText := processor.Process(text)
 	if finalText == "" {
 		e.emit.Status("idle", "No speech detected.")
 		return
@@ -445,10 +463,19 @@ func (e *Engine) finalize(text string) {
 
 	wpm := computeWPM(text, e.transcribeSamples)
 	langCode := "Auto"
-	if len(e.cfg.Languages) > 0 {
-		langCode = strings.Join(e.cfg.Languages, ",")
+	languages := e.transcribeLanguages
+	if e.transcribeStarted.IsZero() {
+		languages = e.cfg.Languages
 	}
-	historyErr := e.hist.AddMeasured(finalText, langCode, wpm, postprocess.WordCount(text), float64(e.transcribeSamples)/TargetSampleRate)
+	if len(languages) > 0 {
+		langCode = strings.Join(languages, ",")
+	}
+	var historyErr error
+	if e.transcribeStarted.IsZero() {
+		historyErr = e.hist.AddMeasured(finalText, langCode, wpm, postprocess.WordCount(text), float64(e.transcribeSamples)/TargetSampleRate)
+	} else {
+		historyErr = e.hist.AddResult(finalText, langCode, wpm, postprocess.WordCount(text), float64(e.transcribeSamples)/TargetSampleRate, time.Since(e.transcribeStarted).Seconds(), e.transcribeModel)
+	}
 	e.emit.Transcribed(finalText, wpm, langCode, e.transcribeSamples)
 	if historyErr != nil {
 		log.Printf("Could not save transcription history: %v", historyErr)

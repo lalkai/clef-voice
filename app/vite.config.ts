@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 // Convert the entry to a deferred classic script so it runs after document parse.
 const fileProtocolPlugin: Plugin = {
   name: "clefvoice:file-protocol",
+  apply: "build",
   enforce: "post",
   transformIndexHtml(html) {
     return html

@@ -33,7 +33,7 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
-    @Published var selectedModelSize: WhisperModelSize = .base {
+    @Published var selectedModelSize: WhisperModelSize = AppConfig.defaultModel {
         didSet {
             guard !isUpdatingFromEngine else { return }
             session.loadModel(model: selectedModelSize.rawValue)
@@ -70,7 +70,7 @@ public final class AppViewModel: ObservableObject {
             updateEngineConfig(patch: ["auto_stop_seconds": autoStopSeconds])
         }
     }
-    @Published var vadSensitivity: Float = 0.012 {
+    @Published var vadSensitivity: Double = AppConfig.defaultVadThreshold {
         didSet {
             guard !isUpdatingFromEngine else { return }
             updateEngineConfig(patch: ["vad_threshold": vadSensitivity])
@@ -220,7 +220,7 @@ public final class AppViewModel: ObservableObject {
         if let vad = cfg["vad_enabled"] as? Bool {
             self.isVADEnabled = vad
         }
-        if let th = (cfg["vad_threshold"] as? NSNumber)?.floatValue {
+        if let th = (cfg["vad_threshold"] as? NSNumber)?.doubleValue {
             self.vadSensitivity = th
         }
         if let autoStop = cfg["auto_stop_enabled"] as? Bool {

@@ -1,6 +1,6 @@
 {
   "name": "clef-voice",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "ClefVoice: macOS Swift Native Helper + Go core + Web (React) Settings UI",
   "private": true,
   "type": "module",
@@ -11,6 +11,9 @@
     "build:mac-helper": "make -C native/macos build",
     "install:mac": "make -C native/macos install",
     "app:dev": "npm --prefix app run dev",
-    "app:build": "npm --prefix app run build"
+    "app:build": "npm --prefix app run build",
+    "config:sync": "node scripts/sync-config.mjs",
+    "config:check": "node scripts/sync-config.mjs --check",
+    "test:config": "node --test scripts/tests/*.test.mjs"
   }
 }

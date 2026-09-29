@@ -11,30 +11,35 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/clefvoice/core/internal/appconfig"
 	"github.com/clefvoice/core/internal/postprocess"
 	"github.com/clefvoice/core/internal/storage"
 	"github.com/google/uuid"
 )
 
 type Item struct {
-	ID              string    `json:"id"`
-	Timestamp       time.Time `json:"createdAt"`
-	TimeStr         string    `json:"timestamp"`
-	Text            string    `json:"text"`
-	CharCount       int       `json:"charCount"`
-	WordCount       int       `json:"wordCount"`
-	WPM             float64   `json:"wpm"`
-	Language        string    `json:"language"`
-	DurationSeconds float64   `json:"durationSeconds,omitempty"`
-	SpokenWords     *int      `json:"spokenWords,omitempty"`
+	ID                string    `json:"id"`
+	Timestamp         time.Time `json:"createdAt"`
+	TimeStr           string    `json:"timestamp"`
+	Text              string    `json:"text"`
+	CharCount         int       `json:"charCount"`
+	WordCount         int       `json:"wordCount"`
+	WPM               float64   `json:"wpm"`
+	Language          string    `json:"language"`
+	DurationSeconds   float64   `json:"durationSeconds,omitempty"`
+	SpokenWords       *int      `json:"spokenWords,omitempty"`
+	ProcessingSeconds *float64  `json:"processingSeconds,omitempty"`
+	Model             string    `json:"model,omitempty"`
+	Favorite          bool      `json:"favorite,omitempty"`
 }
 
 type Stats struct {
-	TotalWords     int   `json:"totalWords"`
-	DictationCount int   `json:"dictationCount"`
-	SpeechWPM      int   `json:"speechWpm"`
-	MinutesSaved   int   `json:"minutesSaved"`
-	ActiveDays     []int `json:"activeDays"`
+	TotalWords               int      `json:"totalWords"`
+	DictationCount           int      `json:"dictationCount"`
+	SpeechWPM                int      `json:"speechWpm"`
+	MinutesSaved             int      `json:"minutesSaved"`
+	ActiveDays               []int    `json:"activeDays"`
+	AverageProcessingSeconds *float64 `json:"averageProcessingSeconds,omitempty"`
 }
 
 type Store struct {
@@ -95,29 +100,35 @@ func (s *Store) save() error {
 }
 
 func (s *Store) Add(text, language string, wpm float64) error {
-	return s.add(text, language, wpm, nil, 0)
+	return s.add(text, language, wpm, nil, 0, nil, "")
 }
 
 func (s *Store) AddMeasured(text, language string, wpm float64, spokenWords int, durationSeconds float64) error {
-	return s.add(text, language, wpm, &spokenWords, durationSeconds)
+	return s.add(text, language, wpm, &spokenWords, durationSeconds, nil, "")
 }
 
-func (s *Store) add(text, language string, wpm float64, spokenWords *int, durationSeconds float64) error {
+func (s *Store) AddResult(text, language string, wpm float64, spokenWords int, durationSeconds float64, processingSeconds float64, model string) error {
+	return s.add(text, language, wpm, &spokenWords, durationSeconds, &processingSeconds, model)
+}
+
+func (s *Store) add(text, language string, wpm float64, spokenWords *int, durationSeconds float64, processingSeconds *float64, model string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
 	item := Item{
-		ID:              uuid.New().String(),
-		Timestamp:       now,
-		TimeStr:         now.Format("3:04 PM"),
-		Text:            text,
-		CharCount:       utf8.RuneCountInString(text),
-		WordCount:       postprocess.WordCount(text),
-		WPM:             wpm,
-		Language:        language,
-		SpokenWords:     spokenWords,
-		DurationSeconds: durationSeconds,
+		ID:                uuid.New().String(),
+		Timestamp:         now,
+		TimeStr:           now.Format("3:04 PM"),
+		Text:              text,
+		CharCount:         utf8.RuneCountInString(text),
+		WordCount:         postprocess.WordCount(text),
+		WPM:               wpm,
+		Language:          language,
+		SpokenWords:       spokenWords,
+		DurationSeconds:   durationSeconds,
+		ProcessingSeconds: processingSeconds,
+		Model:             model,
 	}
 
 	previous := s.items
@@ -170,6 +181,25 @@ func (s *Store) GetHistory() []Item {
 	return res
 }
 
+func (s *Store) SetFavorite(id string, favorite bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, item := range s.items {
+		if item.ID != id {
+			continue
+		}
+		previous := s.items
+		s.items = append([]Item(nil), previous...)
+		s.items[i].Favorite = favorite
+		if err := s.save(); err != nil {
+			s.items = previous
+			return err
+		}
+		return nil
+	}
+	return errors.New("history item not found")
+}
+
 func (s *Store) GetStats() Stats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -177,11 +207,17 @@ func (s *Store) GetStats() Stats {
 	totalWords := 0
 	var spokenWords, measuredOutputWords int
 	var totalSeconds float64
+	var processingTotal float64
+	var processingCount int
 
 	now := time.Now()
 	activeMap := make(map[int]bool)
 
 	for _, item := range s.items {
+		if seconds := item.ProcessingSeconds; seconds != nil && *seconds >= 0 && !math.IsInf(*seconds, 0) && !math.IsNaN(*seconds) {
+			processingTotal += *seconds
+			processingCount++
+		}
 		totalWords += item.WordCount
 		words := item.WordCount
 		if item.SpokenWords != nil {
@@ -210,19 +246,25 @@ func (s *Store) GetStats() Stats {
 	if totalSeconds > 0 {
 		speechWpm = float64(spokenWords) / totalSeconds * 60
 		// Output words can differ after post-processing; speed uses spoken words.
-		minutesSaved = int(math.Round(math.Max(0, float64(measuredOutputWords)/40-totalSeconds/60)))
+		minutesSaved = int(math.Round(math.Max(0, float64(measuredOutputWords)/appconfig.TypingWPM-totalSeconds/60)))
 	}
 
 	activeDays := make([]int, 0, len(activeMap))
 	for d := range activeMap {
 		activeDays = append(activeDays, d)
 	}
+	var averageProcessing *float64
+	if processingCount > 0 {
+		average := processingTotal / float64(processingCount)
+		averageProcessing = &average
+	}
 
 	return Stats{
-		TotalWords:     totalWords,
-		DictationCount: len(s.items),
-		SpeechWPM:      int(math.Round(speechWpm)),
-		MinutesSaved:   minutesSaved,
-		ActiveDays:     activeDays,
+		TotalWords:               totalWords,
+		DictationCount:           len(s.items),
+		SpeechWPM:                int(math.Round(speechWpm)),
+		MinutesSaved:             minutesSaved,
+		ActiveDays:               activeDays,
+		AverageProcessingSeconds: averageProcessing,
 	}
 }

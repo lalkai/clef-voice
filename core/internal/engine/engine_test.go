@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/clefvoice/core/internal/config"
 	"github.com/clefvoice/core/internal/history"
@@ -83,6 +84,34 @@ func TestConfigCannotChangeModelWhileLoading(t *testing.T) {
 	}
 }
 
+func TestVoiceAudioChangesPersistWhileModelIsLoading(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	e := &Engine{emit: protocol.NewEmitter(&out), cfg: config.Default(), loading: true}
+	e.Handle(protocol.Command{Cmd: protocol.CmdSetConfig, Config: json.RawMessage(`{"vad_enabled":false,"vad_threshold":0.025,"auto_stop_enabled":true,"auto_stop_seconds":1.2}`)})
+	saved := config.Load()
+	if saved.VADEnabled || saved.VADThreshold != .025 || !saved.AutoStopEnabled || saved.AutoStopSeconds != 1.2 || saved.Model != "base" {
+		t.Fatalf("audio settings did not persist: %+v", saved)
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"vad_threshold":0.025`)) {
+		t.Fatalf("saved sensitivity was not acknowledged: %s", out.String())
+	}
+}
+
+func TestFavoriteCommandPublishesSavedHistory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	e := &Engine{emit: protocol.NewEmitter(&out), cfg: config.Default(), hist: history.NewStore()}
+	if err := e.hist.Add("hello", "en", 120); err != nil {
+		t.Fatal(err)
+	}
+	id := e.hist.GetHistory()[0].ID
+	e.Handle(protocol.Command{Cmd: protocol.CmdSetHistoryFavorite, ID: id, Favorite: true})
+	if !bytes.Contains(out.Bytes(), []byte(`"favorite":true`)) || !history.NewStore().GetHistory()[0].Favorite {
+		t.Fatalf("favorite was not persisted and published: %s", out.String())
+	}
+}
+
 func TestCustomVocabularyUpdateIsAppliedAndPersisted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var out bytes.Buffer
@@ -147,6 +176,19 @@ func TestFinalizationMeasuresSpeechBeforePostprocessing(t *testing.T) {
 	item := e.hist.GetHistory()[0]
 	if item.Text != "hello" || item.WordCount != 1 || item.WPM != 60 || *item.SpokenWords != 2 || item.DurationSeconds != 2 {
 		t.Fatalf("incorrect speech metrics: %+v", item)
+	}
+}
+
+func TestFinalizationUsesSessionSnapshotAndRecordsProcessingTime(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	e := &Engine{emit: protocol.NewEmitter(&out), cfg: config.Default(), hist: history.NewStore(), transcribeSamples: TargetSampleRate,
+		post: postprocess.New(false, true), transcribePost: postprocess.New(true, false),
+		transcribeLanguages: []string{"en"}, transcribeModel: "small", transcribeStarted: time.Now().Add(-time.Second)}
+	e.finalize("um hello")
+	item := e.hist.GetHistory()[0]
+	if item.Text != "hello" || item.Language != "en" || item.Model != "small" || item.ProcessingSeconds == nil || *item.ProcessingSeconds < 1 {
+		t.Fatalf("session snapshot or timing lost: %+v", item)
 	}
 }
 
@@ -225,4 +267,3 @@ func TestHistoryFailureReEmitsCurrentHistory(t *testing.T) {
 		t.Fatalf("expected current history re-emitted on delete failure: %s", out.String())
 	}
 }
-

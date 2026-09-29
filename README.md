@@ -1,6 +1,11 @@
 # ClefVoice
 
-Local voice-to-text dictation for macOS. The Windows helper is an unfinished prototype and is not packaged for users yet.
+Private voice typing for Thai and English on macOS. Hold Fn, speak, and release
+to transcribe locally with Whisper. The Windows helper is an unfinished prototype
+and is not packaged for users yet.
+
+Audio and transcripts stay on your device. Internet is needed to build the app
+and download models; transcription does not use a cloud API or require an account.
 
 ```
 ClefVoice (Architecture)
@@ -11,7 +16,7 @@ ClefVoice (Architecture)
 │   ├── internal/capture/ # High-performance audio capture (miniaudio, 16 kHz mono f32)
 │   ├── internal/vad/     # Voice Activity Detection (VAD) & energy silence trimmer
 │   ├── internal/postprocess/ # Thai/English word count, filler removal, capitalization
-│   └── cmd/clefd/        # Go Daemon: stdio JSON-RPC engine loop
+│   └── cmd/clefd/        # Go Daemon: newline-delimited JSON engine loop
 │
 ├── 🍏 native/macos/ (macOS Shell & Helper — Swift / AppKit)
 │   ├── Sources/ClefVoice/
@@ -39,13 +44,13 @@ The speech recognition pipeline and data calculations live in the **Go core engi
 The macOS shell (Swift) manages the global hotkey, floating HUD, menu bar, and text insertion.
 
 ```
-WKWebView (React Dashboard)  ──[JS Bridge]──▶  Platform Shell (Swift)  ──[JSON-RPC]──▶  clefd (Go)
+WKWebView (React Dashboard)  ──[JS Bridge]──▶  Platform Shell (Swift)  ──[JSON lines]──▶  clefd (Go)
                                                (MenuBar/HUD/Hotkey/Insert)               (Audio + VAD + Whisper + History)
 ```
 
 ### Engine Protocol (clefd ↔ Native Shell)
 
-- **Commands (stdin):** `get_config`, `get_state`, `set_config`, `load_model`, `start`, `stop`, `toggle`, `get_history`, `get_stats`, `clear_history`, `delete_history`, `ping`, `shutdown`.
+- **Commands (stdin):** `get_config`, `get_state`, `set_config`, `load_model`, `start`, `stop`, `toggle`, `get_history`, `get_stats`, `clear_history`, `delete_history`, `set_history_favorite`, `ping`, `shutdown`.
 - **Events (stdout):** `ready`, `status`, `level`, `transcribed`, `history`, `stats`, `model_progress`, `model_loaded`, `error`.
 
 ### Web Dashboard Bridge (WKWebView ↔ Native Shell)
@@ -54,15 +59,16 @@ The React dashboard is embedded directly into `ClefVoice.app/Contents/Resources/
 - `getState`, `getSettings`, `updateSettings`
 - `getLanguages`, `getModelSizes`, `getHotkeys`
 - `checkPermissions`, `requestAccessibility`, `requestMicrophone`, `requestInputMonitoring`
-- `loadModel`, `getHistory`, `getStats`, `clearHistory`, `deleteHistoryItem`
+- `loadModel`, `getHistory`, `getStats`, `clearHistory`, `deleteHistoryItem`, `setHistoryFavorite`
 
 ---
 
 ## Features
 
 - **Local transcription** — The app downloads a Whisper model on first use (unless it is already cached). After that, transcription runs on your device with `whisper.cpp`; audio and transcript data are not uploaded.
-- **Local history** — Transcripts are stored as plain text in `~/.clefvoice/history.json` for the History view. The app restricts that file and its settings directory to the current macOS user; clear saved transcripts from History when you no longer need them.
-- **Thai & English** — Mixed-language recognition and estimated word counts; Thai counts currently use a character-based approximation.
+- **Local history** — Search Thai and English words together, star favorite transcripts, and copy previous text. History stores up to 1,000 transcripts in plain text in `~/.clefvoice/history.json`, restricted to the current macOS user. Favorites are part of that same retained history, not a separate permanent archive; Clear also removes favorites.
+- **Thai & English** — Select Thai for Thai-only dictation or Thai + English for automatic language detection. Custom Vocabulary provides spelling hints for Thai names and technical terms; recognition quality varies with the model and audio.
+- **Model selection** — Choose Tiny, Base, Small, or Large V3 Turbo. History records the model and measured time to transcript for new sessions.
 - **Dashboard and floating HUD** — The dashboard opens on launch; the HUD shows microphone levels while recording.
 - **Text insertion** — After transcription, the app uses the clipboard and `Cmd+V` to insert text into the focused field. If the target app does not accept the paste, copy the transcript from History.
 - **Custom Vocabulary & Cleanup** — User-added terms are passed to Whisper as spelling hints; filler words such as `um`, `uh`, `เอ่อ`, and `แบบว่า` can be removed.
@@ -117,6 +123,26 @@ if it is not cached. Transcription itself runs locally.
    - Wait for transcription to finish. The app then attempts to paste the text
      into the focused field; use History to copy it if pasting is unavailable.
 
+### Shared app configuration
+
+Edit `app.config.json` for the version, app name, bundle identifier, model catalog,
+default model, VAD threshold, and the typing speed used by statistics. Builds
+sync these values into React, Go, Swift, package manifests, and the lockfile
+automatically. Generated files are committed so direct Go/Swift builds work
+without generation; do not edit those files by hand.
+
+After changing the config, you can sync or check it explicitly:
+
+```bash
+npm run config:sync
+npm run config:check
+npm run test:config
+```
+
+Commit the config and its synced outputs together. CI rejects stale outputs and
+release tags that disagree with the configured version. This build configuration
+sets app defaults; existing user settings in `~/.clefvoice/config.json` stay intact.
+
 ### Install to Applications folder
 ```bash
 npm run install:mac
@@ -130,15 +156,22 @@ while `npm run install:mac` updates `/Applications/ClefVoice.app`.
 ### Public source repository
 
 This repository provides source code and build instructions. GitHub Actions
-checks the macOS build only; the Windows job is commented out until the helper
-has a Windows build of `clefd.exe` and a complete package. The workflow does not
-publish downloadable app bundles.
-Local macOS builds are signed ad hoc for development. A future downloadable
-macOS release would need Developer ID signing and notarization.
+checks the macOS build and packages DMG/ZIP artifacts. Version tags also publish
+these files as GitHub releases. The Windows job remains commented out until the
+helper has a Windows build of `clefd.exe` and a complete package.
+The current macOS bundles are signed ad hoc, without Developer ID notarization;
+macOS may block first launch. Build from source or use the first-open instructions
+above for a downloaded copy you trust.
 
 ---
 
 ## Model startup and statistics
+
+In Preferences, **Model** selects Tiny (~75 MB), Base (~142 MB), Small (~466 MB),
+or Large V3 Turbo (~1.5 GB). Base remains the default. Selecting a model downloads
+it if needed; larger models also need more RAM. Compare the same phrases on your
+Mac, including Thai names and mixed technical terms, and check both spelling and
+History timings.
 
 - The engine prepares the saved model on startup. `ready` means the process can
   accept commands; only `model_loaded` means speech recognition is ready.
@@ -160,13 +193,21 @@ macOS release would need Developer ID signing and notarization.
   original measurements; their duration is inferred from saved words/WPM. Previous
   VAD trimming and any historical shortcut expansion cannot be corrected
   without original audio.
+- New sessions also store `model` and `processingSeconds`: time from the engine
+  handling stop through capture teardown, VAD, audio cleanup, recognition, and
+  text cleanup. It excludes History file writes, paste delivery, and model startup.
+  The dashboard averages only sessions that have this measurement; older history
+  displays no timing rather than an invented zero.
+- `set_history_favorite` takes `id` and `favorite`. Favorites persist in the same
+  local history file. Search matches all space-separated terms in any order,
+  including mixed Thai/English queries.
 
 ### Regression checks
 
 ```bash
 (cd core && go test ./...)
 (cd core && go test -race ./internal/engine ./internal/models ./internal/history ./internal/postprocess)
-node --test app/tests/api.test.mjs
+node --test app/tests/*.test.mjs
 npm --prefix app run build
 (cd native/macos && swift build)
 (cd native/macos && swift test)

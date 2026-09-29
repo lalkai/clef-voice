@@ -25,6 +25,17 @@ jobs:
         with:
           node-version: 22
 
+      - name: Validate Shared Config
+        run: |
+          node scripts/sync-config.mjs --check
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=$(node scripts/sync-config.mjs --get version)
+            if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match app.config.json version $VERSION"
+              exit 1
+            fi
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -37,11 +48,14 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm --prefix app ci
 
+      - name: Shared Config Tests
+        run: npm run test:config
+
       - name: Frontend Typecheck & Build
         run: npm --prefix app run build
 
       - name: Frontend API Tests
-        run: node --test app/tests/api.test.mjs
+        run: node --test app/tests/*.test.mjs
 
       - name: Build macOS App
         run: make -C native/macos build
@@ -54,22 +68,23 @@ jobs:
           if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
             VERSION="$GITHUB_REF_NAME"
           else
-            PKG_VER=$(node -p "require('./package.json').version" 2>/dev/null || echo "latest")
+            PKG_VER=$(node scripts/sync-config.mjs --get version)
             VERSION="v${PKG_VER#v}"
           fi
-          echo "Packaging ClefVoice version: $VERSION"
+          APP_NAME=$(node scripts/sync-config.mjs --get name)
+          echo "Packaging $APP_NAME version: $VERSION"
           cd native/macos
-          hdiutil create -volname "ClefVoice" -srcfolder "ClefVoice.app" -ov -format UDZO "ClefVoice-${VERSION}-macOS.dmg"
-          ditto -c -k --sequesterRsrc --keepParent "ClefVoice.app" "ClefVoice-${VERSION}-macOS.zip"
-          ls -lh ClefVoice-*-macOS.*
+          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_NAME.app" -ov -format UDZO "$APP_NAME-${VERSION}-macOS.dmg"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$APP_NAME-${VERSION}-macOS.zip"
+          ls -lh "$APP_NAME"-*-macOS.*
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ClefVoice-macOS
           path: |
-            native/macos/ClefVoice-*-macOS.dmg
-            native/macos/ClefVoice-*-macOS.zip
+            native/macos/*-macOS.dmg
+            native/macos/*-macOS.zip
           retention-days: 14
 
       - name: Create GitHub Release
@@ -79,8 +94,8 @@ jobs:
           name: "ClefVoice ${{ github.ref_name }}"
           generate_release_notes: true
           files: |
-            native/macos/ClefVoice-*-macOS.dmg
-            native/macos/ClefVoice-*-macOS.zip
+            native/macos/*-macOS.dmg
+            native/macos/*-macOS.zip
 
   # Windows is not enabled yet; the helper still needs a packaged clefd.exe.
   # build-windows:

@@ -1,11 +1,14 @@
 {
   "name": "clef-voice-app",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "predev": "node ../scripts/sync-config.mjs",
+    "prebuild": "node ../scripts/sync-config.mjs",
+    "pretypecheck": "node ../scripts/sync-config.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.38.0",

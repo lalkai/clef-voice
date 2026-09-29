@@ -1,3 +1,5 @@
+import { appConfig } from "./appConfig.generated";
+
 import type {
   HistoryItem,
   Language,
@@ -23,7 +25,8 @@ export type BridgeMethod =
   | "getStats"
   | "clearHistory"
   | "deleteHistoryItem"
-  | "toggleDictation";
+  | "toggleDictation"
+  | "setHistoryFavorite";
 
 declare global {
   interface Window {
@@ -37,12 +40,12 @@ declare global {
 // Fallback state for Browser Dev Mode
 let mockSettings: Settings = {
   selectedLanguages: ["th", "en"],
-  modelSize: "base",
+  modelSize: appConfig.defaultModel,
   hotkey: "Fn",
   vadEnabled: true,
   autoStopEnabled: false,
   autoStopSeconds: 0.9,
-  vadThreshold: 0.012,
+  vadThreshold: appConfig.defaultVadThreshold,
   removeFillerWords: true,
   autoCapitalize: true,
   customVocabulary: ["ClefVoice", "Whisper", "Swift", "TailwindCSS", "Kubernetes", "Next.js"],
@@ -52,10 +55,12 @@ let mockHistory: HistoryItem[] = [
   {
     id: "h1",
     timestamp: "10:42 AM",
-    text: "สวัสดีครับ ลองทดสอบระบบถอดความเสียงด้วย Whispr Flow UI บน macOS",
+    text: "สวัสดีครับ ลองทดสอบการถอดเสียงภาษาไทยกับศัพท์ technical ด้วย ClefVoice",
     charCount: 65,
     wordCount: 11,
     wpm: 145,
+    processingSeconds: 0.8,
+    model: "base",
   },
   {
     id: "h2",
@@ -64,27 +69,31 @@ let mockHistory: HistoryItem[] = [
     charCount: 77,
     wordCount: 11,
     wpm: 152,
+    processingSeconds: 1.2,
+    model: "large-v3-turbo",
   },
   {
     id: "h3",
     timestamp: "09:15 AM",
-    text: "Automatic text insertion at cursor location works seamlessly across all native applications.",
+    text: "Use History to copy the transcript when the target app does not accept pasting.",
     charCount: 97,
     wordCount: 13,
     wpm: 155,
   },
-];
+].map((item) => ({ ...item, charCount: Array.from(item.text).length }));
 
 function getMockStats(): Stats {
   const totalWords = mockHistory.reduce((sum, item) => sum + item.wordCount, 0);
   const totalMinutes = mockHistory.reduce((sum, item) => sum + (item.wpm > 0 ? item.wordCount / item.wpm : 0), 0);
   const speechWpm = totalMinutes > 0 ? Math.round(totalWords / totalMinutes) : 0;
+  const timings = mockHistory.flatMap((item) => item.processingSeconds != null && Number.isFinite(item.processingSeconds) && item.processingSeconds >= 0 ? [item.processingSeconds] : []);
   return {
     totalWords,
     dictationCount: mockHistory.length,
     speechWpm,
-    minutesSaved: speechWpm ? Math.max(0, Math.round(totalWords / 40 - totalWords / speechWpm)) : 0,
+    minutesSaved: speechWpm ? Math.max(0, Math.round(totalWords / appConfig.typingWpm - totalWords / speechWpm)) : 0,
     activeDays: mockHistory.length ? [new Date().getDay()] : [],
+    averageProcessingSeconds: timings.length ? timings.reduce((sum, seconds) => sum + seconds, 0) / timings.length : undefined,
   };
 }
 
@@ -103,12 +112,7 @@ const mockLanguages: Language[] = [
   { code: "de", name: "German (Deutsch)" },
 ];
 
-const mockModelSizes: OptionItem[] = [
-  { value: "tiny", label: "Tiny (~75 MB - Fast)" },
-  { value: "base", label: "Base (~142 MB - Balanced)" },
-  { value: "small", label: "Small (~466 MB - Accurate)" },
-  { value: "large-v3-turbo", label: "Turbo (~1.5 GB - Best)" },
-];
+const mockModelSizes: OptionItem[] = appConfig.models.map((model) => ({ value: model.id, label: model.label }));
 
 const mockHotkeys: OptionItem[] = [
   { value: "LeftControl", label: "⌃ Left Control (Hold to talk)" },
@@ -132,6 +136,11 @@ function call<T>(method: BridgeMethod, params?: Record<string, unknown>): Promis
       return Promise.resolve(undefined);
     case "clearHistory":
       mockHistory = [];
+      emitMockHistory();
+      return Promise.resolve(undefined);
+    case "setHistoryFavorite":
+      mockHistory = mockHistory.map((item) => item.id === params?.id
+        ? { ...item, favorite: Boolean(params?.favorite) } : item);
       emitMockHistory();
       return Promise.resolve(undefined);
     case "getState":
@@ -191,6 +200,9 @@ export const deleteHistoryItem = (id: string): Promise<void | undefined> =>
   call<void>("deleteHistoryItem", { id });
 
 export const toggleDictation = (): Promise<void | undefined> => call<void>("toggleDictation");
+
+export const setHistoryFavorite = (id: string, favorite: boolean): Promise<void | undefined> =>
+  call<void>("setHistoryFavorite", { id, favorite });
 
 
 export const getState = () => call<{ status: import("../types").AppStatus; message: string; progress: number }>("getState");

@@ -1,6 +1,9 @@
 package vad
 
-import "github.com/clefvoice/core/internal/dsp"
+import (
+	"github.com/clefvoice/core/internal/appconfig"
+	"github.com/clefvoice/core/internal/dsp"
+)
 
 // TargetSampleRate is the fixed sample rate of the audio pipeline.
 const TargetSampleRate = 16000
@@ -9,7 +12,7 @@ const (
 	// FrameSize is the analysis frame length in samples (32ms @ 16kHz).
 	FrameSize = 512
 	// DefaultRMSThreshold is the default energy threshold.
-	DefaultRMSThreshold = 0.012
+	DefaultRMSThreshold = appconfig.DefaultVADThreshold
 	speechConfirmFrames = 4
 )
 

@@ -105,6 +105,55 @@ func TestLegacyHistoryRemainsReadable(t *testing.T) {
 	}
 }
 
+func TestMeasuredHistoryAndFavoritesSurviveReload(t *testing.T) {
+	s := &Store{path: filepath.Join(t.TempDir(), "history.json")}
+	if err := s.AddResult("สวัสดี React", "th,en", 120, 4, 2, .75, "base"); err != nil {
+		t.Fatal(err)
+	}
+	id := s.GetHistory()[0].ID
+	if err := s.SetFavorite(id, true); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := &Store{path: s.path}
+	reloaded.load()
+	item := reloaded.GetHistory()[0]
+	if !item.Favorite || item.Model != "base" || item.ProcessingSeconds == nil || *item.ProcessingSeconds != .75 {
+		t.Fatalf("metadata lost after reload: %+v", item)
+	}
+	if err := reloaded.SetFavorite(id, false); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.GetHistory()[0].Favorite {
+		t.Fatal("favorite was not removed")
+	}
+	if err := reloaded.SetFavorite("missing", true); err == nil {
+		t.Fatal("missing item silently accepted")
+	}
+}
+
+func TestFavoriteSaveFailureKeepsPreviousValue(t *testing.T) {
+	s := &Store{path: filepath.Join(t.TempDir(), "missing", "history.json"), items: []Item{{ID: "keep"}}}
+	if err := s.SetFavorite("keep", true); err == nil {
+		t.Fatal("expected save failure")
+	}
+	if s.GetHistory()[0].Favorite {
+		t.Fatal("failed favorite update changed memory")
+	}
+}
+
+func TestProcessingAverageExcludesLegacyHistory(t *testing.T) {
+	a, b := 1.0, 3.0
+	s := &Store{items: []Item{{Text: "legacy"}, {ProcessingSeconds: &a}, {ProcessingSeconds: &b}}}
+	got := s.GetStats().AverageProcessingSeconds
+	if got == nil || *got != 2 {
+		t.Fatalf("average = %v, want 2", got)
+	}
+	s.items = []Item{{Text: "legacy"}}
+	if s.GetStats().AverageProcessingSeconds != nil {
+		t.Fatal("legacy history invented zero latency")
+	}
+}
+
 func TestActivityExcludesOldAndFutureEntries(t *testing.T) {
 	now := time.Now()
 	s := &Store{items: []Item{

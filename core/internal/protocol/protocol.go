@@ -8,27 +8,29 @@ import (
 
 // Command is a line-delimited JSON-RPC request received on stdin.
 type Command struct {
-	Cmd    string          `json:"cmd"`
-	Config json.RawMessage `json:"config"`
-	Model  string          `json:"model"`
-	ID     string          `json:"id"`
+	Cmd      string          `json:"cmd"`
+	Config   json.RawMessage `json:"config"`
+	Model    string          `json:"model"`
+	ID       string          `json:"id"`
+	Favorite bool            `json:"favorite"`
 }
 
 // Command names.
 const (
-	CmdPing          = "ping"
-	CmdGetState      = "get_state"
-	CmdSetConfig     = "set_config"
-	CmdLoadModel     = "load_model"
-	CmdStart         = "start"
-	CmdStop          = "stop"
-	CmdToggle        = "toggle"
-	CmdShutdown      = "shutdown"
-	CmdGetHistory    = "get_history"
-	CmdClearHistory  = "clear_history"
-	CmdDeleteHistory = "delete_history"
-	CmdGetStats      = "get_stats"
-	CmdGetConfig     = "get_config"
+	CmdPing               = "ping"
+	CmdGetState           = "get_state"
+	CmdSetConfig          = "set_config"
+	CmdLoadModel          = "load_model"
+	CmdStart              = "start"
+	CmdStop               = "stop"
+	CmdToggle             = "toggle"
+	CmdShutdown           = "shutdown"
+	CmdGetHistory         = "get_history"
+	CmdClearHistory       = "clear_history"
+	CmdDeleteHistory      = "delete_history"
+	CmdGetStats           = "get_stats"
+	CmdGetConfig          = "get_config"
+	CmdSetHistoryFavorite = "set_history_favorite"
 )
 
 // Emitter serializes events to stdout as newline-delimited JSON.

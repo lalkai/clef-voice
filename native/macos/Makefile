@@ -1,6 +1,6 @@
 # Makefile for ClefVoice
 
-APP_NAME = ClefVoice
+APP_NAME = $(shell node ../../scripts/sync-config.mjs --get name)
 APP_BUNDLE = $(APP_NAME).app
 INSTALL_PATH = /Applications/$(APP_BUNDLE)
 
@@ -39,6 +39,7 @@ install: build
 	@echo "✅ Installed successfully!"
 
 test:
+	node ../../scripts/sync-config.mjs
 	swift test
 
 clean:

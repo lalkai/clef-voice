@@ -27,7 +27,7 @@ public struct MenuBarView: View {
         VStack(spacing: 0) {
             // Top Header: Title + Status Pill
             HStack {
-                Text("ClefVoice")
+                Text(AppConfig.name)
                     .font(.system(size: 15, weight: .bold))
                 Spacer()
                 statusBadgePill
@@ -197,7 +197,7 @@ public struct MenuBarView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
-                Text("Open ClefVoice")
+                Text("Open \(AppConfig.name)")
                     .font(.system(size: 13))
 
                 Spacer()
@@ -247,7 +247,7 @@ public struct MenuBarView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
-                Text("Quit ClefVoice")
+                Text("Quit \(AppConfig.name)")
                     .font(.system(size: 13))
 
                 Spacer()

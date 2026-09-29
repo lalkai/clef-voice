@@ -7,7 +7,13 @@ const source = await readFile(new URL('../src/lib/api.ts', import.meta.url), 'ut
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
-const api = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const configSource = await readFile(new URL('../src/lib/appConfig.generated.ts', import.meta.url), 'utf8');
+const configText = ts.transpileModule(configSource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const configURL = `data:text/javascript;base64,${Buffer.from(configText).toString('base64')}`;
+const bundledAPI = outputText.replace('"./appConfig.generated"', JSON.stringify(configURL));
+const api = await import(`data:text/javascript;base64,${Buffer.from(bundledAPI).toString('base64')}`);
 
 globalThis.window = new EventTarget();
 // Also supports Node 18, which does not expose CustomEvent globally.
@@ -27,6 +33,17 @@ test('browser settings retain independent patches and auto-detect selection', as
   assert.ok(!(await api.getLanguages()).some((language) => language.code === 'auto'));
 });
 
+test('browser favorites change history without changing measurements', async () => {
+  const items = await api.getHistory();
+  const stats = await api.getStats();
+  assert.equal(stats.averageProcessingSeconds, 1);
+  await api.setHistoryFavorite(items[0].id, true);
+  assert.equal((await api.getHistory())[0].favorite, true);
+  assert.deepEqual(await api.getStats(), stats);
+  await api.setHistoryFavorite(items[0].id, false);
+  assert.equal((await api.getHistory())[0].favorite, false);
+});
+
 test('browser history mutations update data and statistics', async () => {
   const items = await api.getHistory();
   let stats;
@@ -38,6 +55,7 @@ test('browser history mutations update data and statistics', async () => {
   assert.deepEqual(await api.getHistory(), []);
   assert.equal(stats.totalWords, 0);
   assert.deepEqual(stats.activeDays, []);
+  assert.equal(stats.averageProcessingSeconds, undefined);
   assert.deepEqual(await api.getStats(), stats);
 });
 

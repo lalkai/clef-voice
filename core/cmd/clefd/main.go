@@ -8,18 +8,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/clefvoice/core/internal/appconfig"
 	"github.com/clefvoice/core/internal/engine"
 	"github.com/clefvoice/core/internal/protocol"
 )
 
-const version = "0.3.4"
-
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(appconfig.Version)
+		return
+	}
 	modelsDir := parseArgs()
 
 	emit := protocol.NewEmitter(os.Stdout)
 	e := engine.New(modelsDir, emit)
-	emit.Ready(version)
+	emit.Ready(appconfig.Version)
 	emit.Config(e.GetConfig())
 	e.Handle(protocol.Command{Cmd: protocol.CmdLoadModel, Model: e.GetConfig().Model})
 
