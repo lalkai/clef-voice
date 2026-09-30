@@ -1,6 +1,6 @@
 # ClefVoice
 
-Private voice typing for Thai and English on macOS. Hold Fn, speak, and release
+Private voice typing on macOS. Hold Fn, speak, and release
 to transcribe locally with Whisper. The Windows helper is an unfinished prototype
 and is not packaged for users yet.
 
