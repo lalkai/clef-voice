@@ -36,6 +36,7 @@ const (
 	CmdDeleteHistory      = "delete_history"
 	CmdGetStats           = "get_stats"
 	CmdGetConfig          = "get_config"
+	CmdGetLanguages       = "get_languages"
 	CmdSetHistoryFavorite = "set_history_favorite"
 )
 
@@ -121,6 +122,12 @@ func (e *Emitter) OperationError(message string) {
 
 func (e *Emitter) Result(id, state, message string) {
 	if id != "" {
-		e.emit(map[string]any{"type": "command_result", "request_id": id, "state": state, "message": message, "result": true})
+		e.ResultValue(id, state, message, true)
+	}
+}
+
+func (e *Emitter) ResultValue(id, state, message string, result any) {
+	if id != "" {
+		e.emit(map[string]any{"type": "command_result", "request_id": id, "state": state, "message": message, "result": result})
 	}
 }

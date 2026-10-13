@@ -1,6 +1,6 @@
 // Generated from app.config.json by scripts/sync-config.mjs. Do not edit.
 enum AppConfig {
-    static let version = "0.4.1"
+    static let version = "0.4.2"
     static let name = "ClefVoice"
     static let defaultHotkey = "Fn"
     static let defaultVADEnabled = true

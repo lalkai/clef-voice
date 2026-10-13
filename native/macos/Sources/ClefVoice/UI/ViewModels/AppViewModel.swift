@@ -29,59 +29,7 @@ public final class AppViewModel: ObservableObject {
         return items.contains { $0["active"] as? Bool == true && $0["downloaded"] as? Bool == true && $0["status"] as? String == "downloaded" }
     }
 
-    public private(set) var latestEngineConfig: [String: Any] = [:]
-    private var isUpdatingFromEngine = false
-
-    @Published var selectedLanguages: Set<WhisperLanguage> = [] {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["languages": selectedLanguages.map(\.rawValue).sorted()])
-        }
-    }
-
-    @Published var selectedModelSize: WhisperModelSize = AppConfig.defaultModel {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            session.loadModel(model: selectedModelSize.rawValue)
-        }
-    }
-
-    @Published var selectedHotkey: HotkeyType = .launchSelection() {
-        didSet {
-            if status == .idle { statusMessage = "Hold \(selectedHotkey.shortName) to dictate" }
-            if session.selectedHotkey != selectedHotkey {
-                session.selectedHotkey = selectedHotkey
-                session.setupHotkey()
-            }
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["hotkey": selectedHotkey.rawValue])
-        }
-    }
-
-    @Published var isVADEnabled = AppConfig.defaultVADEnabled {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["vad_enabled": isVADEnabled])
-        }
-    }
-    @Published var isAutoStopEnabled = AppConfig.defaultAutoStopEnabled {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["auto_stop_enabled": isAutoStopEnabled])
-        }
-    }
-    @Published var autoStopSeconds: Double = AppConfig.defaultAutoStopSeconds {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["auto_stop_seconds": autoStopSeconds])
-        }
-    }
-    @Published var vadSensitivity: Double = AppConfig.defaultVadThreshold {
-        didSet {
-            guard !isUpdatingFromEngine else { return }
-            updateEngineConfig(patch: ["vad_threshold": vadSensitivity])
-        }
-    }
+    @Published private(set) var selectedHotkey: HotkeyType = .launchSelection()
 
     @Published var downloadProgress: Double = 0
     @Published var isDownloadingModel = false
@@ -154,18 +102,16 @@ public final class AppViewModel: ObservableObject {
                     HUDWindowController.shared.updateHUD(viewModel: self)
                     MainWindowController.shared.push("status", ["status": s.rawValue, "message": msg])
 
-                case .finalTranscription(let text, let wpm):
+                case .finalTranscription(let text, let wpm, let language):
                     self.lastTranscribedText = text
                     self.lastWPM = wpm
-                    let lang = self.selectedLanguages.isEmpty ? "Auto"
-                        : self.selectedLanguages.map(\.rawValue).sorted().joined(separator: ",")
 
                     self.requestHistory()
                     self.requestStats()
 
                     HUDWindowController.shared.updateHUD(viewModel: self)
                     MainWindowController.shared.push("transcribed", [
-                        "text": text, "wpm": wpm, "language": lang,
+                        "text": text, "wpm": wpm, "language": language,
                         "timestamp": Date().timeIntervalSince1970,
                     ])
 
@@ -218,56 +164,16 @@ public final class AppViewModel: ObservableObject {
     }
 
     func applyEngineConfig(_ cfg: [String: Any]) {
-        self.latestEngineConfig = cfg
-        self.isUpdatingFromEngine = true
-        defer { self.isUpdatingFromEngine = false }
-
-        if let langs = cfg["languages"] as? [String] {
-            let set = Set(langs.compactMap(WhisperLanguage.init(rawValue:)))
-            self.selectedLanguages = set
+        if let raw = cfg["hotkey"] as? String, let hotkey = HotkeyType(persistedValue: raw) {
+            selectedHotkey = hotkey
+            if session.selectedHotkey != hotkey {
+                session.selectedHotkey = hotkey
+                session.setupHotkey()
+            }
         }
-        if let raw = cfg["model"] as? String, let size = WhisperModelSize(rawValue: raw) {
-            self.selectedModelSize = size
+        if let settings = try? SettingsPresentation.webJSON(cfg) {
+            MainWindowController.shared.push("settings", settings)
         }
-        if let raw = cfg["hotkey"] as? String, let hk = HotkeyType(persistedValue: raw) {
-            self.selectedHotkey = hk
-        }
-        if let vad = cfg["vad_enabled"] as? Bool {
-            self.isVADEnabled = vad
-        }
-        if let th = (cfg["vad_threshold"] as? NSNumber)?.doubleValue {
-            self.vadSensitivity = th
-        }
-        if let autoStop = cfg["auto_stop_enabled"] as? Bool {
-            self.isAutoStopEnabled = autoStop
-        }
-        if let secs = (cfg["auto_stop_seconds"] as? NSNumber)?.doubleValue {
-            self.autoStopSeconds = secs
-        }
-        MainWindowController.shared.push("settings", settingsJSON())
-    }
-
-    func updateEngineConfig(patch: [String: Any]) {
-        // The engine merges patches into its current config. Sending a cached full
-        // config here can undo another change whose acknowledgement is still pending.
-        session.engine.send(["cmd": "set_config", "config": patch])
-    }
-
-    func settingsJSON() -> [String: Any] {
-        let customVocab = latestEngineConfig["custom_vocabulary"] as? [String] ?? AppConfig.defaultCustomVocabulary
-        return [
-            "selectedLanguages": selectedLanguages.map(\.rawValue).sorted(),
-            "modelSize": selectedModelSize.rawValue,
-            "hotkey": selectedHotkey.rawValue,
-            "hotkeyLabel": selectedHotkey.displayName,
-            "vadEnabled": isVADEnabled,
-            "vadThreshold": NSNumber(value: vadSensitivity),
-            "autoStopEnabled": isAutoStopEnabled,
-            "autoStopSeconds": NSNumber(value: autoStopSeconds),
-            "removeFillerWords": latestEngineConfig["remove_filler_words"] as? Bool ?? AppConfig.defaultRemoveFiller,
-            "autoCapitalize": latestEngineConfig["auto_capitalize"] as? Bool ?? AppConfig.defaultAutoCapitalize,
-            "customVocabulary": customVocab,
-        ]
     }
 
     func copyHistoryEntry(_ entry: TranscriptionEntry) {

@@ -56,10 +56,6 @@ final class DictationSession: ObservableObject {
         )
     }
 
-    func loadModel(model: String) {
-        engine.send(["cmd": "load_model", "model": model])
-    }
-
     func toggleDictation() { (isRecording || isStartingCapture || isWaitingForModel || captureRequested) ? stop() : start() }
 
     func start() {
@@ -148,8 +144,8 @@ final class DictationSession: ObservableObject {
         case .level(let level):
             events.send(.audioLevelUpdated(level))
 
-        case .transcribed(let text, let wpm, _, _, let id):
-            finalize(text, wpm: wpm, id: id)
+        case .transcribed(let text, let wpm, let language, _, let id):
+            finalize(text, wpm: wpm, language: language, id: id)
 
         case .modelProgress(let model, let progress, let downloading):
             events.send(.modelProgress(model: model, progress: progress, downloading: downloading))
@@ -200,7 +196,7 @@ final class DictationSession: ObservableObject {
         engine.send(["cmd": "start", "session_id": sessionID.uuidString])
     }
 
-    private func finalize(_ text: String, wpm: Double, id: String?) {
+    private func finalize(_ text: String, wpm: Double, language: String, id: String?) {
         isRecording = false
         isStartingCapture = false
         isWaitingForModel = false
@@ -209,7 +205,7 @@ final class DictationSession: ObservableObject {
             events.send(.statusChanged(.idle, "No speech detected."))
             return
         }
-        events.send(.finalTranscription(text, wpm))
+        events.send(.finalTranscription(text, wpm, language))
         let completedSession = id.flatMap(UUID.init(uuidString:)) ?? sessionID
         let deliveryTarget: PasteTarget
         if let id {

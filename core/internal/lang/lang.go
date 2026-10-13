@@ -4,11 +4,11 @@ import "strings"
 
 // Language describes a supported recognition language.
 type Language struct {
-	Code string
-	Name string
+	Code string `json:"code"`
+	Name string `json:"name"`
 }
 
-// Languages lists the app's manual choices, matching Swift WhisperLanguage.
+// Languages is the shared manual-choice catalog for all platform helpers.
 // Auto-detection uses the model tokenizer and is not restricted to this list.
 var Languages = []Language{
 	{"th", "Thai (ภาษาไทย)"},

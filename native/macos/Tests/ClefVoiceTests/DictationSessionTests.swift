@@ -205,7 +205,7 @@ final class DictationSessionTests: XCTestCase {
         let session = DictationSession(engine: engine, registerHotkey: false,
             insert: { _, _, _ in pasted = true })
         let subscription = session.events.sink {
-            if case .finalTranscription(let text, _) = $0 { retained = text }
+            if case .finalTranscription(let text, _, _) = $0 { retained = text }
             if case .notice(let message) = $0 { notice = message }
         }
         session.start()
@@ -213,6 +213,22 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertFalse(pasted)
         XCTAssertEqual(retained, "keep this")
         XCTAssertTrue(notice.contains("Copy"))
+        withExtendedLifetime(subscription) {}
+    }
+
+    @MainActor
+    func testTranscriptionKeepsCoreSessionLanguage() {
+        let engine = FakeEngine()
+        let session = DictationSession(engine: engine, registerHotkey: false, insert: { _, _, _ in })
+        var received: String?
+        let subscription = session.events.sink {
+            if case .finalTranscription(_, _, let language) = $0 { received = language }
+        }
+        session.start()
+        engine.onEvent?(.config(["languages": ["ja"]]))
+        engine.onEvent?(EngineEvent(json: ["type": "transcribed", "text": "hello", "wpm": 1,
+            "language": "en", "samples": 16000, "session_id": engine.commands.last?["session_id"] as? String ?? ""])!)
+        XCTAssertEqual(received, "en", "Native helper must not infer session language from current settings")
         withExtendedLifetime(subscription) {}
     }
 

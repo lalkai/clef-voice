@@ -153,7 +153,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testProductionAPIThroughSwiftSerializerAndWKBridge() async throws {
-        let script = try productionAPIScript()
+        let script = try productionFixtureScript()
         let success = try await exerciseBridge(mode: .normal, body: "return {setup: await window.testAPI.completeSetup(), copy: await window.testAPI.copyText('ไทย') === undefined};", extraScript: script, nativeResult: true)
         let object = try XCTUnwrap(success as? [String: Any])
         XCTAssertEqual(object["setup"] as? Bool, true)
@@ -179,7 +179,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testRealSetupExitsOnlyWhenNativeReturnsTrue() async throws {
-        let script = try productionAPIScript(fixture: "setup-ui-fixture.mjs")
+        let script = try productionFixtureScript(mode: "setup")
         let body = """
         const wait = () => new Promise(resolve => setTimeout(resolve, 50));
         await wait();
@@ -197,7 +197,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testMainAppOnlyShowsSetupUntilCompletion() async throws {
-        let script = try productionAPIScript(fixture: "main-app-ui-fixture.mjs")
+        let script = try productionFixtureScript(mode: "main")
         let results = mainAppResults()
         let helper = """
         const button = text => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === text);
@@ -230,7 +230,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testSettingsRecoveryCannotOverwriteNewerConfirmedSettings() async throws {
-        let script = try productionAPIScript(fixture: "main-app-ui-fixture.mjs")
+        let script = try productionFixtureScript(mode: "main")
         for newerSave in [false, true] {
             let body = """
             const wait = () => new Promise(r => setTimeout(r,25));
@@ -253,7 +253,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testSetupShowsDownloadFailureOnlyOnceUnderItsModel() async throws {
-        let script = try productionAPIScript(fixture: "setup-ui-fixture.mjs")
+        let script = try productionFixtureScript(mode: "setup")
         for inventoryFailure in [false, true] {
             let body = """
             const wait = () => new Promise(resolve => setTimeout(resolve, 50));
@@ -282,7 +282,7 @@ final class WebBridgeTests: XCTestCase {
 
     @MainActor
     func testSetupConnectionChangeUnlocksPendingDownload() async throws {
-        let script = try productionAPIScript(fixture: "setup-ui-fixture.mjs")
+        let script = try productionFixtureScript(mode: "setup")
         let body = """
         const wait = () => new Promise(resolve => setTimeout(resolve, 50));
         const button = text => [...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(text));
@@ -295,6 +295,54 @@ final class WebBridgeTests: XCTestCase {
         let result = try await exerciseBridge(mode: .drop, body: body, extraScript: script) as? [String: Any]
         XCTAssertEqual(result?["backEnabled"] as? Bool, true)
         XCTAssertTrue((result?["error"] as? String)?.contains("connection changed") == true)
+    }
+
+    @MainActor
+    func testProductionAPIReadsAndValidatesSettingsThroughRealCore() async throws {
+        guard let binary = ProcessInfo.processInfo.environment["CLEF_TEST_ENGINE"] else {
+            throw XCTSkip("Set CLEF_TEST_ENGINE for the native-helper boundary test")
+        }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = home.path
+        let engine = EngineClient(enginePath: { binary }, environment: environment,
+            arguments: ["--models-dir", home.appendingPathComponent("models").path], retryLimit: 0)
+        defer { engine.onEvent = nil; engine.terminate() }
+        let ready = expectation(description: "isolated core ready")
+        var received = false
+        engine.onEvent = { event in
+            if case .ready = event, !received { received = true; ready.fulfill() }
+        }
+        engine.launch()
+        await fulfillment(of: [ready], timeout: 5)
+        let script = try productionFixtureScript()
+        let body = """
+        const initial = await window.testAPI.getSettings();
+        await window.testAPI.updateSettings({vadEnabled:false,selectedLanguages:['ja'],customVocabulary:['คำเฉพาะ']});
+        const saved = await window.testAPI.getSettings();
+        let invalidRejected = false;
+        try { await window.testAPI.updateSettings({autoStopSeconds:-1}); } catch { invalidRejected = true; }
+        let invalidTypeRejected = false;
+        try { await window.testAPI.updateSettings({vadEnabled:'wrong-type'}); } catch { invalidTypeRejected = true; }
+        const afterFailure = await window.testAPI.getSettings();
+        const languages = await window.testAPI.getLanguages();
+        let modelRejected = false;
+        try { await window.testAPI.loadModel('not-a-model'); } catch { modelRejected = true; }
+        return {initial,saved,afterFailure,languages,invalidRejected,invalidTypeRejected,modelRejected};
+        """
+        let response = try await exerciseBridge(mode: .normal, body: body, extraScript: script, engine: engine)
+        let result = try XCTUnwrap(response as? [String: Any])
+        let saved = try XCTUnwrap(result["saved"] as? [String: Any])
+        XCTAssertEqual(saved["vadEnabled"] as? Bool, false)
+        XCTAssertEqual(saved["selectedLanguages"] as? [String], ["ja"])
+        XCTAssertEqual(saved["customVocabulary"] as? [String], ["คำเฉพาะ"])
+        XCTAssertEqual((result["afterFailure"] as? NSDictionary), saved as NSDictionary)
+        XCTAssertEqual((result["languages"] as? [[String: Any]])?.count, 27)
+        XCTAssertEqual(result["invalidRejected"] as? Bool, true)
+        XCTAssertEqual(result["invalidTypeRejected"] as? Bool, true)
+        XCTAssertEqual(result["modelRejected"] as? Bool, true)
     }
 
     private func mainAppResults() -> [String: Any] {
@@ -315,12 +363,12 @@ final class WebBridgeTests: XCTestCase {
         ]
     }
 
-    private func productionAPIScript(fixture: String = "bridge-api-fixture.mjs") throws -> String {
+    private func productionFixtureScript(mode: String = "api") throws -> String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["node", root.appendingPathComponent("scripts/" + fixture).path]
+        process.arguments = ["node", root.appendingPathComponent("scripts/tests/fixtures/web.mjs").path, mode]
         let output = Pipe()
         process.standardOutput = output
         try process.run()
@@ -331,12 +379,13 @@ final class WebBridgeTests: XCTestCase {
     }
 
     @MainActor
-    private func exerciseBridge(mode: BridgeHarness.Mode, body: String, extraScript: String = "", nativeResult: Bool = false, nativeResults: [String: Any] = [:]) async throws -> Any? {
+    private func exerciseBridge(mode: BridgeHarness.Mode, body: String, extraScript: String = "", nativeResult: Bool = false, nativeResults: [String: Any] = [:], engine: EngineClient? = nil) async throws -> Any? {
         let loaded = expectation(description: "bridge document loaded")
         let harness = BridgeHarness(loaded: loaded)
         harness.mode = mode
         harness.result = nativeResult
         harness.nativeResults = nativeResults
+        harness.engine = engine
         let content = WKUserContentController()
         content.add(harness, name: "clefVoice")
         content.add(harness, name: "testResult")
@@ -374,6 +423,7 @@ private final class BridgeHarness: NSObject, WKScriptMessageHandler, WKNavigatio
     var onResult: ((Result<Any, Error>) -> Void)?
     weak var webView: WKWebView?
     var result = false
+    var engine: EngineClient?
     var nativeResults: [String: Any] = [:]
     var methods: [String] = []
     var trustedRoot: URL?
@@ -411,6 +461,18 @@ private final class BridgeHarness: NSObject, WKScriptMessageHandler, WKNavigatio
         if mode == .drop { return }
         do { try MainWindowController.validateMethod(method) }
         catch { reply(WebBridge.rejectScript(id: id, message: error.localizedDescription)); return }
+        if let engine {
+            do {
+                let command = try XCTUnwrap(MainWindowController.engineCommand(method: method, params: json["params"] as? [String: Any] ?? [:]))
+                engine.request(command, accepted: { reply("window.__clefVoiceAccepted(\(id));") }) { result in
+                    do {
+                        let value = try MainWindowController.engineResponse(method: method, value: result.get())
+                        reply(WebBridge.resolveScript(id: id, result: value))
+                    } catch { reply(WebBridge.rejectScript(id: id, message: error.localizedDescription)) }
+                }
+            } catch { reply(WebBridge.rejectScript(id: id, message: error.localizedDescription)) }
+            return
+        }
         if mode == .settingsFailure && method == "updateSettings" && methods.filter({ $0 == method }).count == 1 {
             reply(WebBridge.rejectScript(id: id, message: "Settings save failed in fixture.")); return
         }

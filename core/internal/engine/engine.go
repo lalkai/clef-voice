@@ -121,6 +121,14 @@ func (e *Engine) Handle(cmd protocol.Command) bool {
 	if cmd.RequestID == "" {
 		return e.handle(cmd)
 	}
+	switch cmd.Cmd {
+	case protocol.CmdGetConfig:
+		e.emit.ResultValue(cmd.RequestID, "completed", "", e.cfg)
+		return false
+	case protocol.CmdGetLanguages:
+		e.emit.ResultValue(cmd.RequestID, "completed", "", lang.Languages)
+		return false
+	}
 	modelMutation := cmd.Cmd == protocol.CmdDownloadModel || cmd.Cmd == protocol.CmdLoadModel || cmd.Cmd == protocol.CmdDeleteModel
 	if modelMutation {
 		if _, ok := models.FromStr(cmd.Model); !ok {
@@ -156,6 +164,8 @@ func (e *Engine) handle(cmd protocol.Command) bool {
 		e.emit.Config(e.cfg)
 	case protocol.CmdGetConfig:
 		e.emit.Config(e.cfg)
+	case protocol.CmdGetLanguages:
+		e.operationError("get_languages requires a request_id.")
 	case protocol.CmdGetState:
 		if e.loading {
 			e.emit.Status(e.loadStatus, e.loadMessage)

@@ -141,7 +141,9 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
                         reply("window.__clefVoiceAccepted(\(id.intValue));")
                     }, completion: { result in
                         switch result {
-                        case .success(let value): reply(WebBridge.resolveScript(id: id.intValue, result: value))
+                        case .success(let value):
+                            do { reply(WebBridge.resolveScript(id: id.intValue, result: try Self.engineResponse(method: method, value: value))) }
+                            catch { reply(WebBridge.rejectScript(id: id.intValue, message: error.localizedDescription)) }
                         case .failure(let error): reply(WebBridge.rejectScript(id: id.intValue, message: error.localizedDescription))
                         }
                     })
@@ -229,10 +231,6 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
             return NSPasteboard.general.setString(text, forType: .string)
         case "getState":
             return ["status": vm.status.rawValue, "message": vm.statusMessage, "progress": vm.downloadProgress]
-        case "getSettings":
-            return settingsJSON(vm)
-        case "getLanguages":
-            return WhisperLanguage.allCases.map { ["code": $0.rawValue, "name": $0.displayName] }
         case "getModels":
             vm.requestModels()
             return vm.modelInventory
@@ -267,11 +265,6 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
         }
     }
 
-    @MainActor
-    private static func settingsJSON(_ vm: AppViewModel) -> [String: Any] {
-        return vm.settingsJSON()
-    }
-
     public func windowWillClose(_ notification: Notification) {
         if let alert = shortcutAlert, let window { window.endSheet(alert.window) }
     }
@@ -299,11 +292,13 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
 
     static func engineCommand(method: String, params: [String: Any]) throws -> [String: Any]? {
         switch method {
+        case "getSettings": return ["cmd": "get_config"]
+        case "getLanguages": return ["cmd": "get_languages"]
         case "updateSettings":
             guard let settings = params["settings"] as? [String: Any] else { throw EngineFailure("Missing settings.") }
             return ["cmd": "set_config", "config": engineConfigPatch(settings)]
         case "downloadModel", "loadModel", "deleteModel":
-            guard let model = params["size"] as? String, WhisperModelSize(rawValue: model) != nil else { throw EngineFailure("Unknown model.") }
+            guard let model = params["size"] as? String else { throw EngineFailure("Missing model.") }
             return ["cmd": method == "downloadModel" ? "download_model" : method == "loadModel" ? "load_model" : "delete_model", "model": model]
         case "cancelDownload": return ["cmd": "cancel_download"]
         case "clearHistory": return ["cmd": "clear_history"]
@@ -319,20 +314,14 @@ public final class MainWindowController: NSWindowController, WKScriptMessageHand
         }
     }
 
-    static func engineConfigPatch(_ json: [String: Any]) -> [String: Any] {
-        var patch: [String: Any] = [:]
-        if let hotkey = json["hotkey"] as? String { patch["hotkey"] = hotkey }
-        if let langs = json["selectedLanguages"] as? [String] { patch["languages"] = langs }
-        if let model = json["modelSize"] as? String { patch["model"] = model }
-        if let vad = json["vadEnabled"] as? Bool { patch["vad_enabled"] = vad }
-        if let th = (json["vadThreshold"] as? NSNumber)?.doubleValue { patch["vad_threshold"] = th }
-        if let autoStop = json["autoStopEnabled"] as? Bool { patch["auto_stop_enabled"] = autoStop }
-        if let secs = (json["autoStopSeconds"] as? NSNumber)?.doubleValue { patch["auto_stop_seconds"] = secs }
-        if let remove = json["removeFillerWords"] as? Bool { patch["remove_filler_words"] = remove }
-        if let cap = json["autoCapitalize"] as? Bool { patch["auto_capitalize"] = cap }
-        if let vocab = json["customVocabulary"] as? [String] { patch["custom_vocabulary"] = vocab }
+    static func engineResponse(method: String, value: Any?) throws -> Any? {
+        guard method == "getSettings" else { return value }
+        guard let config = value as? [String: Any] else { throw EngineFailure("Missing engine settings.") }
+        return try SettingsPresentation.webJSON(config)
+    }
 
-        return patch
+    static func engineConfigPatch(_ json: [String: Any]) -> [String: Any] {
+        SettingsPresentation.enginePatch(json)
     }
 
     // MARK: - JSON helpers

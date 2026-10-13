@@ -169,6 +169,55 @@ final class EngineRecoveryTests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsReadUsesRealCoreInsteadOfNativeCache() async throws {
+        guard let binary = ProcessInfo.processInfo.environment["CLEF_TEST_ENGINE"] else {
+            throw XCTSkip("Set CLEF_TEST_ENGINE for the authoritative settings test")
+        }
+        let read = try XCTUnwrap(MainWindowController.engineCommand(method: "getSettings", params: [:]))
+        let languages = try XCTUnwrap(MainWindowController.engineCommand(method: "getLanguages", params: [:]))
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = home.path
+        let engine = EngineClient(enginePath: { binary }, environment: environment,
+            arguments: ["--models-dir", home.appendingPathComponent("models").path], retryLimit: 0)
+        defer { engine.onEvent = nil; engine.terminate() }
+        let completed = expectation(description: "core owns settings reads and language choices")
+        var requested = false
+        engine.onEvent = { event in
+            guard case .ready = event, !requested else { return }
+            requested = true
+            engine.request(["cmd": "set_config", "config": ["languages": ["ja"], "vad_enabled": false]], accepted: {}) { result in
+                if case .failure(let error) = result { XCTFail(error.localizedDescription) }
+                engine.request(read, accepted: {}) { result in
+                    do {
+                        let config = try XCTUnwrap(try result.get() as? [String: Any])
+                        XCTAssertEqual(config["languages"] as? [String], ["ja"])
+                        XCTAssertEqual(config["vad_enabled"] as? Bool, false)
+                        let settings = try XCTUnwrap(MainWindowController.engineResponse(method: "getSettings", value: config) as? [String: Any])
+                        XCTAssertEqual(settings["selectedLanguages"] as? [String], ["ja"])
+                        XCTAssertEqual(settings["vadEnabled"] as? Bool, false)
+                        let script = WebBridge.resolveScript(id: 7, result: settings)
+                        XCTAssertTrue(script.contains("vadEnabled"))
+                    } catch { XCTFail(error.localizedDescription) }
+                    engine.request(languages, accepted: {}) { result in
+                        do {
+                            let choices = try XCTUnwrap(try result.get() as? [[String: Any]])
+                            XCTAssertEqual(choices.count, 27)
+                            XCTAssertEqual(choices.first?["code"] as? String, "th")
+                            XCTAssertEqual(choices.first?["name"] as? String, "Thai (ภาษาไทย)")
+                        } catch { XCTFail(error.localizedDescription) }
+                        completed.fulfill()
+                    }
+                }
+            }
+        }
+        engine.launch()
+        await fulfillment(of: [completed], timeout: 5)
+    }
+
+    @MainActor
     func testGracefulShutdownDeliversCommandBeforeProcessExits() async throws {
         let path = try fixture("while read line; do case \"$line\" in *shutdown*) exit 0;; esac; done\n")
         let engine = EngineClient(enginePath: { path.path }, retryLimit: 0)

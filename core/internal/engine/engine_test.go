@@ -282,3 +282,37 @@ func TestInvalidAudioSettingsKeepRecordingAndReconcileConfig(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestSettingsReadReturnsAuthoritativeCorrelatedPayload(t *testing.T) {
+	var out bytes.Buffer
+	cfg := config.Default()
+	cfg.Languages = []string{"ja"}
+	cfg.VADEnabled = false
+	e := &Engine{emit: protocol.NewEmitter(&out), cfg: cfg}
+	e.Handle(protocol.Command{Cmd: protocol.CmdGetConfig, RequestID: "read-1"})
+	var event struct {
+		Type      string        `json:"type"`
+		RequestID string        `json:"request_id"`
+		Result    config.Config `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "command_result" || event.RequestID != "read-1" || !reflect.DeepEqual(event.Result, cfg) {
+		t.Fatalf("wrong read result: %+v", event)
+	}
+	out.Reset()
+	e.Handle(protocol.Command{Cmd: protocol.CmdGetConfig})
+	if !bytes.Contains(out.Bytes(), []byte(`"type":"config"`)) {
+		t.Fatal("legacy event reads must remain supported")
+	}
+}
+
+func TestLanguageReadWithoutRequestIDReportsError(t *testing.T) {
+	var out bytes.Buffer
+	e := &Engine{emit: protocol.NewEmitter(&out)}
+	e.Handle(protocol.Command{Cmd: protocol.CmdGetLanguages})
+	if !bytes.Contains(out.Bytes(), []byte("get_languages requires a request_id")) {
+		t.Fatal("missing request ID must not silently discard the language read")
+	}
+}

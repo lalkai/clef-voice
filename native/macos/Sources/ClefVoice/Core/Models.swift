@@ -14,7 +14,7 @@ public enum DictationEvent {
     case notice(String)
     case connection(connected: Bool, generation: Int, message: String)
     case statusChanged(AppStatus, String)
-    case finalTranscription(String, Double)
+    case finalTranscription(String, Double, String)
     case audioLevelUpdated(Float)
     case modelProgress(model: String, progress: Double, downloading: Bool)
     case history([Any])

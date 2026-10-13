@@ -35,9 +35,7 @@ run: build
 
 install: build
 	@echo "Installing $(APP_BUNDLE) to $(INSTALL_PATH)..."
-	rm -rf "$(INSTALL_PATH)"
-	cp -r "$(APP_BUNDLE)" "/Applications/"
-	@echo "✅ Installed successfully!"
+	../../scripts/install-macos.sh --local "$(APP_BUNDLE)" --dir "/Applications"
 
 test:
 	node ../../scripts/sync-config.mjs

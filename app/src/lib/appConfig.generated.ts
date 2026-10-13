@@ -1,6 +1,6 @@
 // Generated from app.config.json by scripts/sync-config.mjs. Do not edit.
 export const appConfig = {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "name": "ClefVoice",
   "bundleIdentifier": "com.clefvoice.app",
   "typingWpm": 40,

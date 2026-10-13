@@ -1,7 +1,7 @@
 // Generated from app.config.json by scripts/sync-config.mjs. Do not edit.
 package appconfig
 
-const Version = "0.4.1"
+const Version = "0.4.2"
 const Name = "ClefVoice"
 const BundleIdentifier = "com.clefvoice.app"
 const TypingWPM = 40
