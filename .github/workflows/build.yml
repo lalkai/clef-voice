@@ -45,8 +45,14 @@ jobs:
       - name: Build & Test Go Core
         run: make -C core build && make -C core test
 
+      - name: Go Vulnerability Check
+        run: go -C core run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
       - name: Install Frontend Dependencies
         run: npm --prefix app ci
+
+      - name: Runtime Dependency Audit
+        run: npm --prefix app audit --omit=dev
 
       - name: Shared Config Tests
         run: npm run test:config
@@ -61,6 +67,8 @@ jobs:
         run: make -C native/macos build
 
       - name: Swift Tests
+        env:
+          CLEF_TEST_ENGINE: ${{ github.workspace }}/core/build/clefd
         run: make -C native/macos test
 
       - name: Package macOS App (DMG & ZIP)
@@ -71,20 +79,21 @@ jobs:
             PKG_VER=$(node scripts/sync-config.mjs --get version)
             VERSION="v${PKG_VER#v}"
           fi
+          ARCH=$(uname -m)
           APP_NAME=$(node scripts/sync-config.mjs --get name)
           echo "Packaging $APP_NAME version: $VERSION"
           cd native/macos
-          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_NAME.app" -ov -format UDZO "$APP_NAME-${VERSION}-macOS.dmg"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$APP_NAME-${VERSION}-macOS.zip"
-          ls -lh "$APP_NAME"-*-macOS.*
+          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_NAME.app" -ov -format UDZO "$APP_NAME-${VERSION}-macOS-${ARCH}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$APP_NAME-${VERSION}-macOS-${ARCH}.zip"
+          ls -lh "$APP_NAME"-*-macOS-*.*
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ClefVoice-macOS
           path: |
-            native/macos/*-macOS.dmg
-            native/macos/*-macOS.zip
+            native/macos/*-macOS-*.dmg
+            native/macos/*-macOS-*.zip
           retention-days: 14
 
       - name: Create GitHub Release
@@ -94,8 +103,8 @@ jobs:
           name: "ClefVoice ${{ github.ref_name }}"
           generate_release_notes: true
           files: |
-            native/macos/*-macOS.dmg
-            native/macos/*-macOS.zip
+            native/macos/*-macOS-*.dmg
+            native/macos/*-macOS-*.zip
 
   # Windows is not enabled yet; the helper still needs a packaged clefd.exe.
   # build-windows:

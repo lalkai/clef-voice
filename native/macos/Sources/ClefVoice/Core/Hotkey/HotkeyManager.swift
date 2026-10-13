@@ -2,13 +2,51 @@ import Foundation
 import Carbon
 import AppKit
 
-public enum HotkeyType: String, CaseIterable, Identifiable, Codable {
-    case leftControl = "LeftControl"
-    case fn = "Fn"
-    case leftOption = "LeftOption"
-    case rightOption = "RightOption"
-    case optionSpace = "OptionSpace"
-    case commandSpace = "CommandSpace"
+public struct HotkeyType: RawRepresentable, CaseIterable, Identifiable, Codable, Equatable {
+    public let rawValue: String
+    public static let leftControl = HotkeyType(value: "LeftControl")
+    public static let fn = HotkeyType(value: "Fn")
+    public static let leftOption = HotkeyType(value: "LeftOption")
+    public static let rightOption = HotkeyType(value: "RightOption")
+    public static let optionSpace = HotkeyType(value: "OptionSpace")
+    public static let commandSpace = HotkeyType(value: "CommandSpace")
+    public static let allCases: [HotkeyType] = [.leftControl, .fn, .leftOption, .rightOption, .optionSpace, .commandSpace]
+    private init(value: String) { rawValue = value }
+    public init?(rawValue: String) { self.init(persistedValue: rawValue) }
+
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let value = HotkeyType(persistedValue: raw) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid hotkey")
+        }
+        self = value
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    static let shortcutFlags: UInt64 = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskShift.rawValue
+    var customParts: (key: UInt32, flags: UInt64)? {
+        let parts = rawValue.split(separator: ":")
+        guard parts.count == 3, parts[0] == "Custom", let key = UInt32(parts[1]), let flags = UInt64(parts[2]) else { return nil }
+        return (key, flags)
+    }
+    static func recorded(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> HotkeyType? {
+        if keyCode == 63 || keyCode == 179 { return .fn }
+        if keyCode == 59 && flags.intersection([.command, .option, .shift]).isEmpty { return .leftControl }
+        if keyCode == 58 && flags.intersection([.command, .control, .shift]).isEmpty { return .leftOption }
+        if keyCode == 61 && flags.intersection([.command, .control, .shift]).isEmpty { return .rightOption }
+        let mask = UInt64(flags.rawValue) & shortcutFlags
+        guard keyCode < 128, mask != 0 else { return nil }
+        let modifiers: Set<UInt16> = [54,55,56,60,59,62,58,61]
+        if modifiers.contains(keyCode), mask.nonzeroBitCount != 1 { return nil }
+        // Keep system navigation and application quit shortcuts available.
+        if mask == CGEventFlags.maskCommand.rawValue && [12,13,48,49].contains(keyCode) { return nil }
+        return HotkeyType(value: "Custom:\(keyCode):\(mask)")
+    }
 
     // The Go config arrives over stdio after launch. Read the same file first so
     // registration and the initial Settings snapshot use one saved hotkey.
@@ -19,7 +57,7 @@ public enum HotkeyType: String, CaseIterable, Identifiable, Codable {
         guard let data = try? Data(contentsOf: configURL),
               let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let value = config["hotkey"] as? String,
-              let hotkey = HotkeyType(persistedValue: value) else { return .fn }
+              let hotkey = HotkeyType(persistedValue: value) else { return HotkeyType(persistedValue: AppConfig.defaultHotkey) ?? .fn }
         return hotkey
     }
 
@@ -32,7 +70,10 @@ public enum HotkeyType: String, CaseIterable, Identifiable, Codable {
         } else if let type = Self.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(value) == .orderedSame }) {
             self = type
         } else {
-            return nil
+            let candidate = HotkeyType(value: value)
+            guard let parts = candidate.customParts, parts.key < 128, parts.flags != 0,
+                  parts.flags & ~Self.shortcutFlags == 0 else { return nil }
+            self = candidate
         }
     }
 
@@ -46,6 +87,7 @@ public enum HotkeyType: String, CaseIterable, Identifiable, Codable {
         case .rightOption: "⌥ Right Option Key"
         case .optionSpace: "⌥ Option + Space"
         case .commandSpace: "⌘ Command + Space"
+        default: customDisplayName
         }
     }
 
@@ -57,8 +99,19 @@ public enum HotkeyType: String, CaseIterable, Identifiable, Codable {
         case .rightOption: "⌥ R-Option"
         case .optionSpace: "⌥Space"
         case .commandSpace: "⌘Space"
+        default: customDisplayName
         }
     }
+    private var customDisplayName: String {
+        guard let parts = customParts else { return "Fn" }
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(parts.flags))
+        let symbols = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "") + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
+        let modifierKeys: Set<UInt32> = [54,55,56,60,59,62,58,61]
+        if modifierKeys.contains(parts.key) { return symbols }
+        let labels: [UInt32:String] = [0:"A",1:"S",2:"D",3:"F",4:"H",5:"G",6:"Z",7:"X",8:"C",9:"V",11:"B",12:"Q",13:"W",14:"E",15:"R",16:"Y",17:"T",18:"1",19:"2",20:"3",21:"4",22:"6",23:"5",24:"=",25:"9",26:"7",27:"−",28:"8",29:"0",30:"]",31:"O",32:"U",33:"[",34:"I",35:"P",36:"Return",37:"L",38:"J",39:"′",40:"K",41:";",42:"\\",43:",",44:"/",45:"N",46:"M",47:".",48:"Tab",49:"Space",50:"`",51:"Delete",53:"Esc",64:"F17",65:"Keypad .",67:"Keypad *",69:"Keypad +",71:"Clear",75:"Keypad /",76:"Enter",78:"Keypad −",79:"F18",80:"F19",81:"Keypad =",82:"Keypad 0",83:"Keypad 1",84:"Keypad 2",85:"Keypad 3",86:"Keypad 4",87:"Keypad 5",88:"Keypad 6",89:"Keypad 7",90:"F20",91:"Keypad 8",92:"Keypad 9",96:"F5",97:"F6",98:"F7",99:"F3",100:"F8",101:"F9",103:"F11",105:"F13",106:"F16",107:"F14",109:"F10",111:"F12",113:"F15",114:"Help",115:"Home",116:"Page Up",117:"Forward Delete",118:"F4",119:"End",120:"F2",121:"Page Down",122:"F1",123:"←",124:"→",125:"↓",126:"↑"]
+        return symbols + (labels[parts.key] ?? "Key \(parts.key)")
+    }
+
 }
 
 public struct HotkeyCombination: Codable, Equatable {
@@ -74,8 +127,11 @@ public struct HotkeyCombination: Codable, Equatable {
         case .leftOption: 58
         case .rightOption: 61
         case .optionSpace, .commandSpace: UInt32(kVK_Space)
+        default: type.customParts?.key ?? 63
         }
     }
+
+    var isModifierOnly: Bool { [54,55,56,60,59,62,58,61,63].contains(keyCode) }
 
     func modifierIsPressed(flags: UInt64) -> Bool {
         // Device-specific masks from IOKit/hidsystem/IOLLEvent.h preserve sides.
@@ -88,6 +144,13 @@ public struct HotkeyCombination: Codable, Equatable {
         case .fn: return flags & CGEventFlags.maskSecondaryFn.rawValue != 0
         case .optionSpace: return flags & CGEventFlags.maskAlternate.rawValue != 0
         case .commandSpace: return flags & CGEventFlags.maskCommand.rawValue != 0
+        default:
+            guard let parts = type.customParts else { return false }
+            if isModifierOnly {
+                let sides: [UInt32:UInt64] = [54:0x10,55:0x08,56:0x02,60:0x04,59:0x01,62:0x2000,58:0x20,61:0x40]
+                return flags & (sides[parts.key] ?? 0) != 0
+            }
+            return flags & HotkeyType.shortcutFlags == parts.flags
         }
     }
 
@@ -101,6 +164,7 @@ public struct HotkeyCombination: Codable, Equatable {
         case .fn: .function
         case .leftOption, .rightOption, .optionSpace: .option
         case .commandSpace: .command
+        default: NSEvent.ModifierFlags(rawValue: UInt(type.customParts?.flags ?? 0))
         }
     }
 }
@@ -109,6 +173,7 @@ public final class HotkeyManager {
 
     public static let shared = HotkeyManager()
 
+    var isRecordingShortcut = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var eventTapHadAccessibility = false
@@ -200,14 +265,7 @@ public final class HotkeyManager {
         Log.hotkey.notice("Recovered CGEventTap: \(self.combination.type.displayName)")
     }
 
-    private var isModifierOnly: Bool {
-        switch combination.type {
-        case .fn, .leftOption, .rightOption, .leftControl:
-            return true
-        default:
-            return false
-        }
-    }
+    private var isModifierOnly: Bool { combination.isModifierOnly }
 
     private var releaseWatchdog: Timer?
 
@@ -229,7 +287,14 @@ public final class HotkeyManager {
                 return Unmanaged.passUnretained(event)
             }
 
+            let wasDown = manager.isKeyDown
+            let targetKey = UInt16(manager.combination.keyCode)
+            let key = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             manager.handleCGEvent(event, type: type)
+            if !manager.isRecordingShortcut, !manager.isModifierOnly, key == targetKey,
+               (type == .keyDown && manager.isKeyDown) || (type == .keyUp && wasDown) {
+                return nil
+            }
             return Unmanaged.passUnretained(event)
         }
 
@@ -256,6 +321,7 @@ public final class HotkeyManager {
     }
 
     private func handleCGEvent(_ event: CGEvent, type: CGEventType) {
+        guard !isRecordingShortcut else { return }
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
 
@@ -275,13 +341,7 @@ public final class HotkeyManager {
             }
         } else {
             let targetKey = UInt16(combination.keyCode)
-            let hasTargetModifier: Bool = {
-                switch combination.type {
-                case .optionSpace: return flags.contains(.maskAlternate)
-                case .commandSpace: return flags.contains(.maskCommand)
-                default: return false
-                }
-            }()
+            let hasTargetModifier = combination.modifierIsPressed(flags: flags.rawValue)
 
             if type == .keyDown && keyCode == targetKey && hasTargetModifier {
                 fireDown()
@@ -304,6 +364,8 @@ public final class HotkeyManager {
             return currentFlags.contains(.maskAlternate)
         case .commandSpace:
             return currentFlags.contains(.maskCommand)
+        default:
+            return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(combination.keyCode))
         }
     }
 
@@ -352,7 +414,7 @@ public final class HotkeyManager {
         } else {
             globalKeyDown = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
                 let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                if e.keyCode == targetKey, mods.contains(targetMod) { self?.fireDown() }
+                if e.keyCode == targetKey, mods.intersection([.command, .control, .option, .shift]) == targetMod { self?.fireDown() }
             }
             globalKeyUp = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { [weak self] e in
                 if e.keyCode == targetKey, self?.isKeyDown == true { self?.fireUp() }
@@ -360,13 +422,13 @@ public final class HotkeyManager {
             globalFlags = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
                 guard let self, self.isKeyDown else { return }
                 let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                if !mods.contains(targetMod) { self.fireUp() }
+                if mods.intersection([.command, .control, .option, .shift]) != targetMod { self.fireUp() }
             }
 
             localKeyDown = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
                 guard let self else { return e }
                 let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                if e.keyCode == targetKey, mods.contains(targetMod) {
+                if e.keyCode == targetKey, mods.intersection([.command, .control, .option, .shift]) == targetMod {
                     self.fireDown()
                     return nil
                 }
@@ -383,16 +445,16 @@ public final class HotkeyManager {
             localFlags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
                 guard let self, self.isKeyDown else { return e }
                 let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                if !mods.contains(targetMod) { self.fireUp() }
+                if mods.intersection([.command, .control, .option, .shift]) != targetMod { self.fireUp() }
                 return e
             }
         }
     }
 
     private func fireDown() {
-        guard !isKeyDown else { return }
+        guard !isKeyDown, !isRecordingShortcut else { return }
         isKeyDown = true
-        if isModifierOnly && combination.type != .fn {
+        if combination.type != .fn {
             DispatchQueue.main.async { [weak self] in
                 self?.startReleaseWatchdog()
             }

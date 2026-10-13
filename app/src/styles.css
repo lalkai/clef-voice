@@ -167,3 +167,44 @@ body {
 /* Remove spinner from number inputs */
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+  outline: 2px solid #a9a2c4;
+  outline-offset: 3px;
+}
+
+.app-panel {
+  border: 1px solid #ffffff12;
+  border-radius: 12px;
+  background: #ffffff05;
+}
+.app-primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #d8d2ed;
+  color: #25212f;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 140ms;
+}
+.app-primary-button:hover { background: #e4dff2; }
+.app-primary-button:disabled { opacity: .3; cursor: not-allowed; }
+.setup-primary-button:disabled {
+  background: #ffffff08;
+  color: #ffffff55;
+  opacity: 1;
+}
+.model-row-selected {
+  margin-inline: -16px;
+  padding-inline: 16px;
+  background: #b3aed00a;
+}
+.model-row-selected:first-child { border-radius: 11px 11px 0 0; }
+.model-row-selected:last-child { border-radius: 0 0 11px 11px; }
+.model-row-selected:only-child { border-radius: 11px; }
+.setup-step { animation: viewIn 180ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .setup-step, .animate-view, .animate-modal { animation: none; }
+}

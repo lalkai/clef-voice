@@ -2,6 +2,7 @@ import { appConfig } from "./appConfig.generated";
 
 import type {
   HistoryItem,
+  ModelInventory,
   Language,
   OptionItem,
   PermissionsPayload,
@@ -10,17 +11,25 @@ import type {
 } from "../types";
 
 export type BridgeMethod =
+  | "retryEngine"
+  | "cancelDownload"
+  | "getSetupState"
+  | "completeSetup"
+  | "copyText"
   | "getState"
   | "getSettings"
   | "updateSettings"
   | "loadModel"
+  | "getModels"
+  | "downloadModel"
+  | "deleteModel"
   | "getLanguages"
   | "getModelSizes"
   | "getHotkeys"
+  | "recordHotkey"
   | "checkPermissions"
   | "requestAccessibility"
   | "requestMicrophone"
-  | "requestInputMonitoring"
   | "getHistory"
   | "getStats"
   | "clearHistory"
@@ -39,16 +48,11 @@ declare global {
 
 // Fallback state for Browser Dev Mode
 let mockSettings: Settings = {
-  selectedLanguages: ["th", "en"],
+  selectedLanguages: [],
   modelSize: appConfig.defaultModel,
-  hotkey: "Fn",
-  vadEnabled: true,
-  autoStopEnabled: false,
-  autoStopSeconds: 0.9,
+  ...appConfig.settingsDefaults,
   vadThreshold: appConfig.defaultVadThreshold,
-  removeFillerWords: true,
-  autoCapitalize: true,
-  customVocabulary: ["ClefVoice", "Whisper", "Swift", "TailwindCSS", "Kubernetes", "Next.js"],
+  customVocabulary: [...appConfig.settingsDefaults.customVocabulary],
 };
 
 let mockHistory: HistoryItem[] = [
@@ -112,6 +116,19 @@ const mockLanguages: Language[] = [
   { code: "de", name: "German (Deutsch)" },
 ];
 
+let mockModels: ModelInventory = {
+  busy: false,
+  items: appConfig.models.map((model) => ({
+    id: model.id, name: model.displayName, sizeLabel: model.sizeLabel, group: model.group, languages: [...model.languages], languageLabel: model.languageLabel, quantization: model.quantization,
+    status: model.id === appConfig.defaultModel ? "downloaded" : "not_downloaded",
+    downloaded: model.id === appConfig.defaultModel, present: model.id === appConfig.defaultModel,
+    active: model.id === appConfig.defaultModel, progress: 0, receivedBytes: 0, totalBytes: -1,
+  })),
+};
+function emitMockModels() {
+  window.dispatchEvent(new CustomEvent("clefVoice:models", { detail: structuredClone(mockModels) }));
+}
+
 const mockModelSizes: OptionItem[] = appConfig.models.map((model) => ({ value: model.id, label: model.label }));
 
 const mockHotkeys: OptionItem[] = [
@@ -125,10 +142,22 @@ function call<T>(method: BridgeMethod, params?: Record<string, unknown>): Promis
   if (window.clefVoice?.call) {
     return window.clefVoice.call(method, params).then((r) => r as T | undefined);
   }
+  if (window.location?.protocol === "file:") {
+    return Promise.reject(new Error("Native bridge unavailable. Reopen the app and try again."));
+  }
   // Dev mode mock fallbacks
   switch (method) {
+    case "getSetupState":
+      return Promise.resolve({ completed: localStorage.getItem("clefVoice.setupCompleted") === "true" } as unknown as T);
+    case "completeSetup":
+      if (mockModels.busy || !mockModels.items.some((item) => item.active && item.downloaded && item.status === "downloaded")) {
+        return Promise.resolve(false as unknown as T);
+      }
+      localStorage.setItem("clefVoice.setupCompleted", "true");
+      return Promise.resolve(true as unknown as T);
     case "updateSettings":
       mockSettings = { ...mockSettings, ...(params?.settings as Partial<Settings>) };
+      window.dispatchEvent(new CustomEvent("clefVoice:settings", { detail: structuredClone(mockSettings) }));
       return Promise.resolve(undefined);
     case "deleteHistoryItem":
       mockHistory = mockHistory.filter((item) => item.id !== params?.id);
@@ -145,12 +174,44 @@ function call<T>(method: BridgeMethod, params?: Record<string, unknown>): Promis
       return Promise.resolve(undefined);
     case "getState":
       return Promise.resolve({ status: "idle", message: "Browser preview", progress: 0 } as unknown as T);
-    case "loadModel":
-      mockSettings = { ...mockSettings, modelSize: String(params?.size) };
-      window.dispatchEvent(new CustomEvent("clefVoice:settings", { detail: mockSettings }));
+    case "getModels":
+      return Promise.resolve(structuredClone(mockModels) as unknown as T);
+    case "downloadModel": {
+      const item = mockModels.items.find((item) => item.id === params?.size);
+      if (!item) return Promise.reject(new Error("Unknown model."));
+      if (mockModels.busy) return Promise.reject(new Error("Engine is busy."));
+      const bytes = appConfig.models.find((model) => model.id === item.id)?.sizeBytes ?? -1;
+      mockModels = { busy: true, items: mockModels.items.map((entry) => entry.id === item.id
+        ? { ...entry, status: "downloading", receivedBytes: 0, totalBytes: bytes, progress: 0 } : entry) };
+      emitMockModels();
+      return new Promise<T | undefined>((resolve) => {
+        setTimeout(() => {
+          mockModels = { busy: false, items: mockModels.items.map((entry) => entry.id === item.id
+            ? { ...entry, status: "downloaded", downloaded: true, present: true, progress: 1, receivedBytes: bytes } : entry) };
+          emitMockModels();
+          resolve(undefined);
+        }, 700);
+      });
+    }
+    case "deleteModel":
+      mockModels = { ...mockModels, items: mockModels.items.map((item) => item.id === params?.size && !mockModels.busy
+        ? { ...item, status: "not_downloaded", downloaded: false, present: false, active: false, progress: 0, receivedBytes: 0, totalBytes: -1 } : item) };
+      emitMockModels();
       return Promise.resolve(undefined);
+    case "loadModel": {
+      const item = mockModels.items.find((item) => item.id === params?.size);
+      if (mockModels.busy) return Promise.reject(new Error("Engine is busy."));
+      if (!item?.downloaded) return Promise.reject(new Error("Download this model first."));
+      {
+        mockSettings = { ...mockSettings, modelSize: item.id };
+        mockModels = { ...mockModels, items: mockModels.items.map((entry) => ({ ...entry, active: entry.id === item.id })) };
+        window.dispatchEvent(new CustomEvent("clefVoice:settings", { detail: mockSettings }));
+        emitMockModels();
+      }
+      return Promise.resolve(undefined);
+    }
     case "getSettings":
-      return Promise.resolve(mockSettings as unknown as T);
+      return Promise.resolve(structuredClone(mockSettings) as unknown as T);
     case "getLanguages":
       return Promise.resolve(mockLanguages as unknown as T);
     case "getModelSizes":
@@ -190,7 +251,6 @@ export const requestAccessibility = (): Promise<void | undefined> => call<void>(
 
 export const requestMicrophone = (): Promise<void | undefined> => call<void>("requestMicrophone");
 
-export const requestInputMonitoring = (): Promise<void | undefined> => call<void>("requestInputMonitoring");
 
 export const getHistory = (): Promise<HistoryItem[] | undefined> => call<HistoryItem[]>("getHistory");
 export const getStats = (): Promise<Stats | undefined> => call<Stats>("getStats");
@@ -206,3 +266,25 @@ export const setHistoryFavorite = (id: string, favorite: boolean): Promise<void 
 
 
 export const getState = () => call<{ status: import("../types").AppStatus; message: string; progress: number }>("getState");
+
+export const getModels = () => call<ModelInventory>("getModels");
+export const downloadModel = (size: string) => call<void>("downloadModel", { size });
+export const deleteModel = (size: string) => call<void>("deleteModel", { size });
+
+export const recordHotkey = (): Promise<OptionItem | undefined> => call<OptionItem>("recordHotkey");
+
+export const copyText = async (text: string): Promise<void> => {
+  if (window.clefVoice?.call) {
+    if (await call<boolean>("copyText", { text }) !== true) {
+      throw new Error("Could not copy text");
+    }
+  } else {
+    await navigator.clipboard.writeText(text);
+  }
+};
+
+export const getSetupState = () => call<{ completed: boolean }>("getSetupState");
+export const completeSetup = () => call<boolean>("completeSetup");
+
+export const retryEngine = () => call<boolean>("retryEngine");
+export const cancelDownload = () => call<boolean>("cancelDownload");

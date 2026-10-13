@@ -33,6 +33,7 @@ export interface Settings {
   selectedLanguages: string[];
   modelSize: string;
   hotkey: string;
+  hotkeyLabel?: string;
   vadEnabled: boolean;
   autoStopEnabled: boolean;
   autoStopSeconds: number;
@@ -51,3 +52,23 @@ export interface Language {
   code: string;
   name: string;
 }
+
+export type ModelStatus = "unverified" | "checking" | "not_downloaded" | "downloading" | "downloaded" | "loading" | "failed";
+export interface ModelItem {
+  group: "general" | "english" | "specialized" | "legacy";
+  languages: string[];
+  languageLabel: string;
+  quantization: string;
+  id: string;
+  name: string;
+  sizeLabel: string;
+  status: ModelStatus;
+  downloaded: boolean;
+  present: boolean;
+  active: boolean;
+  progress: number;
+  receivedBytes: number;
+  totalBytes: number;
+  error?: string;
+}
+export interface ModelInventory { items: ModelItem[]; busy: boolean; connected?: boolean; generation?: number; cancelable?: boolean; operationModel?: string }

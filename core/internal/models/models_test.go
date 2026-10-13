@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +21,7 @@ func fixture(t *testing.T, status int, body string, length int64) (*Manager, Siz
 	t.Helper()
 	calls := new(int)
 	s := Size{Str: "fixture", SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("valid model")))}
-	m := &Manager{Dir: t.TempDir(), client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	m := &Manager{Dir: t.TempDir(), Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		*calls++
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), ContentLength: length, Header: make(http.Header)}, nil
 	})}}
@@ -36,11 +37,11 @@ func noParts(t *testing.T, m *Manager) {
 func TestDownloadVerifiedThenReuse(t *testing.T) {
 	m, s, calls := fixture(t, 200, "valid model", 11)
 	var progress []float64
-	path, err := m.Download(s, func(p float64) { progress = append(progress, p) })
+	_, err := m.Download(s, func(p float64) { progress = append(progress, p) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyChecksum(s, path); err != nil {
+	if err := m.Verify(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
 	if len(progress) == 0 || progress[0] != 0 || progress[len(progress)-1] != 1 {
@@ -82,14 +83,14 @@ func TestCorruptCacheIsRepaired(t *testing.T) {
 	if err := os.WriteFile(m.LocalPath(s), []byte("corrupt cached model"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	path, err := m.Download(s, nil)
+	_, err := m.Download(s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if *calls != 1 {
 		t.Fatal("corrupt cache trusted")
 	}
-	if err := verifyChecksum(s, path); err != nil {
+	if err := m.Verify(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
 	noParts(t, m)
@@ -111,7 +112,7 @@ func TestCancellationDuringRequest(t *testing.T) {
 	m, s, _ := fixture(t, 200, "valid model", 11)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	m.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	m.Client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		cancel()
 		<-r.Context().Done()
 		return nil, r.Context().Err()
@@ -121,6 +122,132 @@ func TestCancellationDuringRequest(t *testing.T) {
 	}
 	if m.IsDownloaded(s) {
 		t.Fatal("cancelled model exists")
+	}
+	noParts(t, m)
+}
+
+func TestByteProgressWithKnownAndUnknownLength(t *testing.T) {
+	for _, total := range []int64{11, -1} {
+		m, s, _ := fixture(t, 200, "valid model", total)
+		var progress []Progress
+		if _, err := m.DownloadWithProgress(context.Background(), s, func(p Progress) { progress = append(progress, p) }); err != nil {
+			t.Fatal(err)
+		}
+		last := progress[len(progress)-1]
+		if last.Received != 11 || last.Total != total || last.Fraction != 1 {
+			t.Fatalf("incorrect byte progress: %+v", last)
+		}
+		if err := m.Verify(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestVerifiedAvailabilityAndSafeDelete(t *testing.T) {
+	m := NewManager(t.TempDir())
+	s := All[0]
+	path := m.LocalPath(s)
+	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if m.IsDownloaded(s) {
+		t.Fatal("corrupt file advertised as downloaded")
+	}
+	other := filepath.Join(m.Dir, "notes.txt")
+	if err := os.WriteFile(other, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(s); err != nil {
+		t.Fatal("deleting a missing model should be idempotent:", err)
+	}
+	if err := m.Delete(Size{Str: "../notes"}); err == nil {
+		t.Fatal("accepted unrelated path")
+	}
+	if data, err := os.ReadFile(other); err != nil || string(data) != "keep" {
+		t.Fatal("unrelated file touched")
+	}
+	if err := os.Symlink(other, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Verify(context.Background(), s); err == nil {
+		t.Fatal("symlink accepted")
+	}
+	if err := m.Delete(s); err == nil {
+		t.Fatal("symlink deleted")
+	}
+	os.Remove(path)
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(s); err == nil {
+		t.Fatal("directory deleted")
+	}
+}
+
+func TestModelLanguagesDoNotMutatePreferences(t *testing.T) {
+	configured := []string{"th", "en"}
+	for _, tt := range []struct {
+		id   string
+		want string
+	}{
+		{"base", "th,en"}, {"tiny-en", "en"}, {"breeze-asr", "en"},
+	} {
+		size, ok := FromStr(tt.id)
+		if !ok {
+			t.Fatal(tt.id)
+		}
+		actual := size.SessionLanguages(configured)
+		if strings.Join(actual, ",") != tt.want {
+			t.Fatalf("%s: %v", tt.id, actual)
+		}
+		actual[0] = "changed"
+		if strings.Join(configured, ",") != "th,en" {
+			t.Fatal("saved preferences mutated")
+		}
+	}
+	english, _ := FromStr("tiny-en")
+	if got := english.SessionLanguages(nil); strings.Join(got, ",") != "en" {
+		t.Fatal(got)
+	}
+	breeze, _ := FromStr("breeze-asr")
+	if got := breeze.SessionLanguages([]string{"th"}); len(got) != 0 {
+		t.Fatal(got)
+	}
+}
+
+func TestCatalogLengthWhenHTTPSizeUnknown(t *testing.T) {
+	m, size, _ := fixture(t, 200, "valid model", -1)
+	size.Bytes = 11
+	size.Filename = "custom-medium-q4.bin"
+	size.URL = "https://example.com/pinned/custom-medium-q4.bin"
+	var last Progress
+	path, err := m.DownloadWithProgress(context.Background(), size, func(p Progress) { last = p })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != size.Filename || last.Total != 11 || last.Fraction != 1 {
+		t.Fatalf("%s: %+v", path, last)
+	}
+	if err := m.Verify(context.Background(), size); err != nil {
+		t.Fatal(err)
+	}
+	m2, wrong, _ := fixture(t, 200, "valid model", -1)
+	wrong.Bytes = 12
+	if _, err := m2.DownloadContext(context.Background(), wrong, nil); err == nil {
+		t.Fatal("catalog length mismatch accepted")
+	}
+	noParts(t, m2)
+}
+
+func TestDownloadPreservesHTTPFailureCode(t *testing.T) {
+	m, s, _ := fixture(t, 403, "access denied", 13)
+	_, err := m.Download(s, nil)
+	var response *HTTPError
+	if !errors.As(err, &response) || response.StatusCode != 403 {
+		t.Fatalf("lost HTTP status: %v", err)
 	}
 	noParts(t, m)
 }

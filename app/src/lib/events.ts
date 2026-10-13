@@ -30,7 +30,7 @@ export function initEvents() {
     window.dispatchEvent(new CustomEvent("clefVoice:stats", { detail: data }));
   });
 
-  for (const type of ["settings", "permissions"]) {
+  for (const type of ["settings", "permissions", "models", "connection", "notice"]) {
     bridge.on(type, (data: any) => {
       window.dispatchEvent(new CustomEvent(`clefVoice:${type}`, { detail: data }));
     });

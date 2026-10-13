@@ -23,10 +23,16 @@ public final class AppViewModel: ObservableObject {
     }
 
     @Published var transcriptionHistory: [TranscriptionEntry] = []
+    @Published private(set) var modelInventory: [String: Any] = ["items": [], "busy": true, "connected": true, "generation": 0]
+    var hasActiveModel: Bool {
+        let items = modelInventory["items"] as? [[String: Any]] ?? []
+        return items.contains { $0["active"] as? Bool == true && $0["downloaded"] as? Bool == true && $0["status"] as? String == "downloaded" }
+    }
+
     public private(set) var latestEngineConfig: [String: Any] = [:]
     private var isUpdatingFromEngine = false
 
-    @Published var selectedLanguages: Set<WhisperLanguage> = [.thai, .english] {
+    @Published var selectedLanguages: Set<WhisperLanguage> = [] {
         didSet {
             guard !isUpdatingFromEngine else { return }
             updateEngineConfig(patch: ["languages": selectedLanguages.map(\.rawValue).sorted()])
@@ -52,19 +58,19 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
-    @Published var isVADEnabled = true {
+    @Published var isVADEnabled = AppConfig.defaultVADEnabled {
         didSet {
             guard !isUpdatingFromEngine else { return }
             updateEngineConfig(patch: ["vad_enabled": isVADEnabled])
         }
     }
-    @Published var isAutoStopEnabled = false {
+    @Published var isAutoStopEnabled = AppConfig.defaultAutoStopEnabled {
         didSet {
             guard !isUpdatingFromEngine else { return }
             updateEngineConfig(patch: ["auto_stop_enabled": isAutoStopEnabled])
         }
     }
-    @Published var autoStopSeconds: Double = 0.9 {
+    @Published var autoStopSeconds: Double = AppConfig.defaultAutoStopSeconds {
         didSet {
             guard !isUpdatingFromEngine else { return }
             updateEngineConfig(patch: ["auto_stop_seconds": autoStopSeconds])
@@ -97,6 +103,7 @@ public final class AppViewModel: ObservableObject {
         HUDWindowController.shared.setup(viewModel: self)
 
         requestConfig()
+        requestModels()
         requestHistory()
         requestStats()
     }
@@ -132,16 +139,18 @@ public final class AppViewModel: ObservableObject {
             .sink { [weak self] event in
                 guard let self else { return }
                 switch event {
+                case .connection(let connected, let generation, let message):
+                    self.modelInventory = ["items": [], "busy": false, "connected": connected, "generation": generation]
+                    MainWindowController.shared.push("connection", ["connected": connected, "generation": generation, "message": message])
+                    MainWindowController.shared.push("models", self.modelInventory)
+                case .notice(let message):
+                    MainWindowController.shared.push("notice", ["message": message, "text": self.lastTranscribedText])
                 case .statusChanged(let s, let msg):
                     self.status = s
                     self.statusMessage = msg
                     self.isModelLoading = s == .loading
                     self.isDownloadingModel = s == .downloading
                     if s == .loading { self.downloadProgress = 0 }
-                    if s == .error {
-                        self.requestHistory()
-                        self.requestStats()
-                    }
                     HUDWindowController.shared.updateHUD(viewModel: self)
                     MainWindowController.shared.push("status", ["status": s.rawValue, "message": msg])
 
@@ -186,6 +195,13 @@ public final class AppViewModel: ObservableObject {
                 case .stats(let stats):
                     MainWindowController.shared.push("stats", stats)
 
+                case .models(let snapshot):
+                    var snapshot = snapshot
+                    snapshot["connected"] = self.modelInventory["connected"] ?? true
+                    snapshot["generation"] = self.modelInventory["generation"] ?? 0
+                    self.modelInventory = snapshot
+                    MainWindowController.shared.push("models", snapshot)
+
                 case .config(let cfg):
                     self.applyEngineConfig(cfg)
                 }
@@ -193,13 +209,12 @@ public final class AppViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func requestModels() { session.engine.send(["cmd": "get_models"]) }
     func requestConfig() { session.engine.send(["cmd": "get_config"]) }
     func requestHistory() { session.engine.send(["cmd": "get_history"]) }
     func requestStats() { session.engine.send(["cmd": "get_stats"]) }
     func clearHistory() {
-        transcriptionHistory.removeAll()
         session.engine.send(["cmd": "clear_history"])
-        MainWindowController.shared.push("history", ["items": []])
     }
 
     func applyEngineConfig(_ cfg: [String: Any]) {
@@ -239,17 +254,18 @@ public final class AppViewModel: ObservableObject {
     }
 
     func settingsJSON() -> [String: Any] {
-        let customVocab = latestEngineConfig["custom_vocabulary"] as? [String] ?? ["ClefVoice", "TypeScript", "TailwindCSS"]
+        let customVocab = latestEngineConfig["custom_vocabulary"] as? [String] ?? AppConfig.defaultCustomVocabulary
         return [
             "selectedLanguages": selectedLanguages.map(\.rawValue).sorted(),
             "modelSize": selectedModelSize.rawValue,
             "hotkey": selectedHotkey.rawValue,
+            "hotkeyLabel": selectedHotkey.displayName,
             "vadEnabled": isVADEnabled,
             "vadThreshold": NSNumber(value: vadSensitivity),
             "autoStopEnabled": isAutoStopEnabled,
             "autoStopSeconds": NSNumber(value: autoStopSeconds),
-            "removeFillerWords": latestEngineConfig["remove_filler_words"] as? Bool ?? true,
-            "autoCapitalize": latestEngineConfig["auto_capitalize"] as? Bool ?? true,
+            "removeFillerWords": latestEngineConfig["remove_filler_words"] as? Bool ?? AppConfig.defaultRemoveFiller,
+            "autoCapitalize": latestEngineConfig["auto_capitalize"] as? Bool ?? AppConfig.defaultAutoCapitalize,
             "customVocabulary": customVocab,
         ]
     }
@@ -264,7 +280,6 @@ public final class AppViewModel: ObservableObject {
     }
 
     func deleteHistoryEntry(id: String) {
-        transcriptionHistory.removeAll { $0.id == id }
         session.engine.send(["cmd": "delete_history", "id": id])
         // The engine emits complete history items and updated stats after deletion.
     }
@@ -309,20 +324,6 @@ public final class AppViewModel: ObservableObject {
             message: "Allow ClefVoice in Accessibility settings so it can insert dictated text into other apps.",
             pane: "Privacy_Accessibility"
         )
-    }
-
-    func requestInputMonitoringPermission() {
-        guard !CGPreflightListenEventAccess() else { checkPermissions(); return }
-        // Only the explicit Grant action may invoke the macOS permission prompt.
-        let granted = CGRequestListenEventAccess()
-        checkPermissions()
-        if !granted {
-            promptToOpenPrivacySettings(
-                title: "Input Monitoring Access",
-                message: "If macOS did not show a permission prompt, allow ClefVoice in Input Monitoring settings, then return to the app.",
-                pane: "Privacy_ListenEvent"
-            )
-        }
     }
 
     private func promptToOpenPrivacySettings(title: String, message: String, pane: String) {

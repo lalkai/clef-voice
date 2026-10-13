@@ -37,8 +37,8 @@ fi
 # 3. Build the Swift shell
 cd "$MACOS_DIR"
 echo "Building ClefVoice..."
-swift build
-BUILD_DIR="$(swift build --show-bin-path)"
+swift build -c release
+BUILD_DIR="$(swift build -c release --show-bin-path)"
 
 # 4. Assemble the app bundle
 echo "Creating app bundle..."
@@ -67,6 +67,9 @@ fi
 # Copy web UI
 mkdir -p "$APP_DIR/Contents/Resources/web"
 cp -R "$WEB_DIST/." "$APP_DIR/Contents/Resources/web/"
+
+# Include the app and bundled runtime dependency licenses.
+node "$PROJECT_ROOT/scripts/bundle-licenses.mjs" "$APP_DIR/Contents/Resources/THIRD_PARTY_NOTICES.txt"
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << EOF
@@ -109,6 +112,7 @@ EOF
 
 # Ad-hoc signing is for local development builds.
 codesign --force --deep --sign - "$APP_DIR"
+node "$PROJECT_ROOT/scripts/verify-bundle.mjs" "$APP_DIR"
 
 echo ""
 echo "✅ Built: $APP_DIR"

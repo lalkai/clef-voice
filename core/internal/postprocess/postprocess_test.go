@@ -13,7 +13,7 @@ func TestEmptyInput(t *testing.T) {
 
 func TestRemovesFillerWords(t *testing.T) {
 	p := New(true, false)
-	if got := p.Process("um hello actually"); got != "hello" {
+	if got := p.Process("um hello uh"); got != "hello" {
 		t.Fatalf("filler removal wrong: %q", got)
 	}
 	if got := p.Process("เอ่อ สวัสดีครับ แบบว่า"); got != "สวัสดีครับ" {
@@ -52,5 +52,30 @@ func TestMixedWordCount(t *testing.T) {
 	}
 	if WordCount("don't stop") != 2 {
 		t.Fatal("apostrophe split word")
+	}
+}
+
+func TestMixedThaiEnglishIsPreserved(t *testing.T) {
+	text := "เดี๋ยวผมจะ refactor service ตัวนี้ แล้วเพิ่ม retry logic เข้าไป"
+	if got := New(true, true).Process(text); got != text {
+		t.Fatalf("mixed-language text changed: %q", got)
+	}
+}
+
+func TestFillerRemovalPreservesMeaningfulWords(t *testing.T) {
+	p := New(true, false)
+	for _, input := range []string{"I like coding", "Actually, you know how this works", "อ่านหนังสือ", "อ่างล้างมือ"} {
+		if got := p.Process(input); got != input {
+			t.Fatalf("%q became %q", input, got)
+		}
+	}
+	if got := p.Process("อ่า อ่า อ่านหนังสือ um uh"); got != "อ่านหนังสือ" {
+		t.Fatalf("hesitations not removed safely: %q", got)
+	}
+}
+
+func TestCapitalizationAfterFillerAndWhitespaceRemoval(t *testing.T) {
+	if got := New(true, true).Process("  um hello world  "); got != "Hello world" {
+		t.Fatal(got)
 	}
 }

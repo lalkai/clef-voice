@@ -8,7 +8,7 @@ import (
 
 var fillerWords = []string{
 	"เอ่อ", "อ่า", "อือ", "อืม", "แบบว่า", "คือว่า",
-	"um", "uh", "hmm", "like", "you know", "actually",
+	"um", "uh", "hmm",
 }
 
 // Processor applies filler-word removal, capitalization and whitespace
@@ -33,16 +33,21 @@ func (p *Processor) Process(text string) string {
 	result := text
 	if p.removeFiller {
 		for _, re := range p.fillers {
-			result = re.ReplaceAllString(result, "")
+			for {
+				next := re.ReplaceAllString(result, "${1}${2}")
+				if next == result {
+					break
+				}
+				result = next
+			}
 		}
 	}
+	ws := regexp.MustCompile(`\s+`)
+	result = strings.TrimSpace(ws.ReplaceAllString(result, " "))
 	if p.autoCaps && result != "" {
 		result = capitalizeFirst(result)
 	}
-
-	ws := regexp.MustCompile(`\s+`)
-	result = ws.ReplaceAllString(result, " ")
-	return strings.TrimSpace(result)
+	return result
 }
 
 func buildFillerRegexes() []*regexp.Regexp {
@@ -51,6 +56,8 @@ func buildFillerRegexes() []*regexp.Regexp {
 		pattern := regexp.QuoteMeta(w)
 		if isASCII(w) {
 			pattern = `\b` + pattern + `\b`
+		} else {
+			pattern = `(^|[^\p{L}\p{M}\p{N}])` + pattern + `($|[^\p{L}\p{M}\p{N}])`
 		}
 		if re, err := regexp.Compile("(?i)" + pattern); err == nil {
 			out = append(out, re)

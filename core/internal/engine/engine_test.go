@@ -48,14 +48,14 @@ func TestModelLoadingPhases(t *testing.T) {
 	if !bytes.Contains(out.Bytes(), []byte(`"downloading":false`)) {
 		t.Fatal("download phase never ended")
 	}
-	e.loadCh <- loadMsg{done: true, err: errors.New("init failed")}
+	e.loadCh <- loadMsg{done: true, operation: "initialization", err: errors.New("init failed")}
 	e.PollLoad()
-	if e.loading || e.loadError != "init failed" || ctx.Err() == nil {
+	if e.loading || e.loadError != modelError("initialization", errors.New("init failed")) || ctx.Err() == nil {
 		t.Fatal("failure did not reset load")
 	}
 	out.Reset()
 	e.Handle(protocol.Command{Cmd: protocol.CmdGetState})
-	if !bytes.Contains(out.Bytes(), []byte("init failed")) {
+	if !bytes.Contains(out.Bytes(), []byte("Could not initialize")) {
 		t.Fatal("late subscriber lost error")
 	}
 }
@@ -156,8 +156,10 @@ func TestModelChoiceIsNotAppliedWhenSavingFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	e := &Engine{emit: protocol.NewEmitter(&out), cfg: config.Default()}
+	e, _ := lifecycleFixture(t, &out)
+	writeModel(t, e, "small")
 	e.loadModel("small")
+	finishModelOperation(t, e)
 	if e.cfg.Model != "base" || e.loading {
 		t.Fatalf("unsaved model choice was applied: model=%q loading=%t", e.cfg.Model, e.loading)
 	}
@@ -265,5 +267,18 @@ func TestHistoryFailureReEmitsCurrentHistory(t *testing.T) {
 	e.Handle(protocol.Command{Cmd: protocol.CmdDeleteHistory, ID: "any-id"})
 	if !bytes.Contains(out.Bytes(), []byte(`"type":"history"`)) || !bytes.Contains(out.Bytes(), []byte("item 1")) {
 		t.Fatalf("expected current history re-emitted on delete failure: %s", out.String())
+	}
+}
+
+func TestInvalidAudioSettingsKeepRecordingAndReconcileConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	e := &Engine{emit: protocol.NewEmitter(&out), cfg: config.Default(), recording: true}
+	e.setConfig(json.RawMessage(`{"vad_threshold":0,"auto_stop_enabled":true}`))
+	if !e.recording || !reflect.DeepEqual(e.cfg, config.Default()) {
+		t.Fatal("invalid settings changed session")
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"recoverable":true`)) || !bytes.Contains(out.Bytes(), []byte(`"type":"config"`)) {
+		t.Fatal(out.String())
 	}
 }

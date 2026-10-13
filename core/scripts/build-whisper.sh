@@ -19,26 +19,30 @@ fi
 
 mkdir -p "$LIB"
 
-# Rebuild only if the CMake cache is missing.
-if [ ! -f "$CMAKE_BUILD/CMakeCache.txt" ]; then
-    echo "Configuring whisper.cpp..."
-    cmake -S "$WCPP" -B "$CMAKE_BUILD" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DWHISPER_BUILD_TESTS=OFF \
-        -DWHISPER_BUILD_EXAMPLES=OFF \
-        -DGGML_BUILD_TESTS=OFF \
-        -DGGML_BUILD_EXAMPLES=OFF \
-        -DGGML_STANDALONE=OFF \
-        -DGGML_METAL=ON \
-        -DGGML_METAL_EMBED_LIBRARY=ON \
-        -DGGML_BLAS=ON \
-        > "$BUILD/cmake-configure.log" 2>&1 || {
-            echo "CMake configuration failed. Log:" >&2
-            cat "$BUILD/cmake-configure.log" >&2
-            exit 1
-        }
+# Reconfigure cached builds too so release flags cannot inherit this Mac's CPU
+# or deployment target from an older build.
+if [ "$(uname -s)" = Darwin ]; then
+    export MACOSX_DEPLOYMENT_TARGET=13.0
 fi
+echo "Configuring whisper.cpp..."
+cmake -S "$WCPP" -B "$CMAKE_BUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+    -DGGML_NATIVE=OFF \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DWHISPER_BUILD_TESTS=OFF \
+    -DWHISPER_BUILD_EXAMPLES=OFF \
+    -DGGML_BUILD_TESTS=OFF \
+    -DGGML_BUILD_EXAMPLES=OFF \
+    -DGGML_STANDALONE=OFF \
+    -DGGML_METAL=ON \
+    -DGGML_METAL_EMBED_LIBRARY=ON \
+    -DGGML_BLAS=ON \
+    > "$BUILD/cmake-configure.log" 2>&1 || {
+        echo "CMake configuration failed. Log:" >&2
+        cat "$BUILD/cmake-configure.log" >&2
+        exit 1
+    }
 
 echo "Building whisper.cpp..."
 cmake --build "$CMAKE_BUILD" --target whisper -j "$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" > "$BUILD/cmake-build.log" 2>&1 || {

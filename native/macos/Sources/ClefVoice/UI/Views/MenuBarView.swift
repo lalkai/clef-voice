@@ -54,6 +54,8 @@ public struct MenuBarView: View {
             dismissPopover()
             if !vm.areAllPermissionsGranted {
                 MainWindowController.shared.showSettings(tab: "preferences")
+            } else if !vm.hasActiveModel {
+                MainWindowController.shared.showSettings(tab: "models")
             } else {
                 MainWindowController.shared.showSettings()
             }
@@ -106,11 +108,9 @@ public struct MenuBarView: View {
                         .foregroundColor(.secondary)
                 } else {
                     Circle()
-                        .fill(Color.green)
+                        .fill(vm.hasActiveModel ? Color.green : Color.orange)
                         .frame(width: 5, height: 5)
-                    Text("Ready")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .accessibilityLabel(vm.hasActiveModel ? "Engine ready" : "Choose a model")
                 }
             }
             .padding(.horizontal, 7)

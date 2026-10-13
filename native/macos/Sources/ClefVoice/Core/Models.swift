@@ -11,6 +11,8 @@ public enum AppStatus: String {
 }
 
 public enum DictationEvent {
+    case notice(String)
+    case connection(connected: Bool, generation: Int, message: String)
     case statusChanged(AppStatus, String)
     case finalTranscription(String, Double)
     case audioLevelUpdated(Float)
@@ -18,6 +20,7 @@ public enum DictationEvent {
     case history([Any])
     case stats([String: Any])
     case config([String: Any])
+    case models([String: Any])
 }
 
 public struct TranscriptionEntry: Identifiable, Equatable {

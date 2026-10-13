@@ -177,6 +177,30 @@ final class TextInserterTests: XCTestCase {
         XCTAssertEqual(board.text, "previous")
     }
 
+    @MainActor
+    func testFocusChangeBeforeDispatchSkipsPasteAndRestoresClipboard() async {
+        let board = TestClipboardStore("previous")
+        var targetMatches = true
+        let finished = expectation(description: "skipped after focus change")
+        let inserter = TextInserter(clipboard: board, canPaste: { true }, paste: { XCTFail("Wrong target"); return true }, targetMatches: { _ in targetMatches })
+        inserter.insertText("transcript", target: PasteTarget(pid: 123, element: nil)) { success in
+            XCTAssertFalse(success)
+            finished.fulfill()
+        }
+        targetMatches = false
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertEqual(board.text, "previous")
+    }
+
+    @MainActor
+    func testChangedTargetIsRejectedBeforeClipboardWrite() {
+        let board = TestClipboardStore("previous")
+        let inserter = TextInserter(clipboard: board, canPaste: { true }, paste: { XCTFail("Wrong target"); return true }, targetMatches: { _ in false })
+        inserter.insertText("transcript", target: PasteTarget(pid: 123, element: nil)) { XCTAssertFalse($0) }
+        XCTAssertEqual(board.text, "previous")
+        XCTAssertEqual(board.changeCount, 0)
+    }
+
     func testHistoryTimestampSupportsFractionalSeconds() {
         XCTAssertNotNil(TranscriptionEntry.parseTimestamp("2026-09-24T12:00:00.123456789Z"))
         XCTAssertNotNil(TranscriptionEntry.parseTimestamp("2026-09-24T12:00:00Z"))

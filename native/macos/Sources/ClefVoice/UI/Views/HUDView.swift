@@ -82,6 +82,7 @@ public final class HUDWindowController: NSWindowController {
 
     private var hostingView: NSHostingView<HUDView>?
     private var hideItem: DispatchWorkItem?
+    private var hideGeneration = 0
 
     private let hudSize = CGSize(width: 80, height: 44)
     private var isVisible = false
@@ -122,10 +123,14 @@ public final class HUDWindowController: NSWindowController {
         let shouldShow = viewModel.isStartingCapture || viewModel.isWaitingForModel || viewModel.status == .recording || viewModel.status == .transcribing
 
         if shouldShow {
-            hideItem?.cancel()
-            hideItem = nil
+            let wasHiding = hideItem != nil
+            if wasHiding {
+                hideGeneration &+= 1
+                hideItem?.cancel()
+                hideItem = nil
+            }
 
-            if !isVisible {
+            if !isVisible || wasHiding {
                 let origin = computeOrigin(panelSize: hudSize)
                 panel.setContentSize(hudSize)
                 panel.setFrameOrigin(origin)
@@ -160,15 +165,19 @@ public final class HUDWindowController: NSWindowController {
     }
 
     private func scheduleHide(panel: NSPanel) {
-        guard hideItem == nil else { return }
+        guard isVisible, hideItem == nil else { return }
+        let generation = hideGeneration
         let work = DispatchWorkItem { [weak self] in
+            guard let self, self.hideGeneration == generation else { return }
             NSAnimationContext.runAnimationGroup({
                 $0.duration = 0.18
                 $0.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: {
+                guard self.hideGeneration == generation else { return }
                 panel.orderOut(nil)
-                self?.isVisible = false
+                self.isVisible = false
+                self.hideItem = nil
             })
         }
         hideItem = work

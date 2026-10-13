@@ -8,8 +8,8 @@ type Language struct {
 	Name string
 }
 
-// Languages is the full list of supported languages, matching the
-// Swift WhisperLanguage enum.
+// Languages lists the app's manual choices, matching Swift WhisperLanguage.
+// Auto-detection uses the model tokenizer and is not restricted to this list.
 var Languages = []Language{
 	{"th", "Thai (ภาษาไทย)"},
 	{"en", "English"},

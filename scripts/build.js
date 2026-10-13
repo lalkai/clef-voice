@@ -19,5 +19,7 @@ build.on("exit", (code) => {
   if (code === 0) {
     console.log("\n✅ ClefVoice build complete! Built: native/macos/" + appName + ".app");
   }
-  process.exit(code ?? 0);
+  process.exit(code ?? 1);
 });
+
+build.on("error", (error) => { console.error(error.message); process.exit(1); });

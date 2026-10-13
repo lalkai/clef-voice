@@ -44,6 +44,26 @@ private final class SystemClipboardStore: ClipboardStore {
     }
 }
 
+struct PasteTarget: Equatable {
+    let pid: pid_t?
+    let element: AXUIElement?
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.pid == rhs.pid else { return false }
+        switch (lhs.element, rhs.element) {
+        case (nil, nil): return true
+        case (let a?, let b?): return CFEqual(a, b)
+        default: return false
+        }
+    }
+    @MainActor static func current() -> Self {
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value)
+        let element = result == .success && value != nil ? (value as! AXUIElement) : nil
+        return Self(pid: pid, element: element)
+    }
+}
+
 @MainActor
 public final class TextInserter {
 
@@ -57,6 +77,7 @@ public final class TextInserter {
     }
 
     private struct QueuedInsertion {
+        let target: PasteTarget
         let text: String
         let completion: (Bool) -> Void
     }
@@ -65,6 +86,7 @@ public final class TextInserter {
     private let canPaste: () -> Bool
     private let paste: () -> Bool
     private let restoreDelay: TimeInterval
+    private let targetMatches: @MainActor (PasteTarget) -> Bool
     private var pendingRestore: PendingRestore?
     private var queuedInsertions: [QueuedInsertion] = []
     private var isStartingQueuedInsertion = false
@@ -77,12 +99,14 @@ public final class TextInserter {
         clipboard: any ClipboardStore,
         canPaste: @escaping () -> Bool,
         paste: @escaping () -> Bool,
-        restoreDelay: TimeInterval = 2
+        restoreDelay: TimeInterval = 2,
+        targetMatches: @escaping @MainActor (PasteTarget) -> Bool = { $0 == PasteTarget.current() }
     ) {
         self.clipboard = clipboard
         self.canPaste = canPaste
         self.paste = paste
         self.restoreDelay = restoreDelay
+        self.targetMatches = targetMatches
     }
 
     public func isAccessibilityGranted() -> Bool {
@@ -90,21 +114,25 @@ public final class TextInserter {
     }
 
     public func insertText(_ text: String, completion: @escaping (Bool) -> Void) {
+        insertText(text, target: PasteTarget.current(), completion: completion)
+    }
+
+    func insertText(_ text: String, target: PasteTarget, completion: @escaping (Bool) -> Void) {
         guard !text.isEmpty else { completion(false); return }
         // A previous target may still be reading the clipboard. Starting a new
         // paste now could make that target receive this transcript instead.
         if pendingRestore != nil || isStartingQueuedInsertion || !queuedInsertions.isEmpty {
-            queuedInsertions.append(QueuedInsertion(text: text, completion: completion))
+            queuedInsertions.append(QueuedInsertion(target: target, text: text, completion: completion))
             startNextInsertion()
             return
         }
-        startInsertion(text, completion: completion)
+        startInsertion(text, target: target, completion: completion)
     }
 
-    private func startInsertion(_ text: String, completion: @escaping (Bool) -> Void) {
+    private func startInsertion(_ text: String, target: PasteTarget, completion: @escaping (Bool) -> Void) {
         // A denied permission must not replace the user's clipboard. The
         // transcript remains available through History for manual copying.
-        guard canPaste() else {
+        guard targetMatches(target), canPaste() else {
             completion(false)
             startNextInsertion()
             return
@@ -126,7 +154,7 @@ public final class TextInserter {
         // Give callers a chance to finish updating focus without adding a
         // fixed 50 ms delay to every insertion.
         DispatchQueue.main.async { [self] in
-            guard ownsClipboard(pending), canPaste(), paste() else {
+            guard ownsClipboard(pending), targetMatches(target), canPaste(), paste() else {
                 finishFailedPaste(pending)
                 completion(false)
                 return
@@ -165,7 +193,7 @@ public final class TextInserter {
         // synchronously (for example, Accessibility was revoked).
         DispatchQueue.main.async { [self] in
             isStartingQueuedInsertion = false
-            startInsertion(next.text, completion: next.completion)
+            startInsertion(next.text, target: next.target, completion: next.completion)
         }
     }
 

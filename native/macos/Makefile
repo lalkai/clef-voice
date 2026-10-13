@@ -2,6 +2,7 @@
 
 APP_NAME = $(shell node ../../scripts/sync-config.mjs --get name)
 APP_BUNDLE = $(APP_NAME).app
+ARCH = $(shell uname -m)
 INSTALL_PATH = /Applications/$(APP_BUNDLE)
 
 .PHONY: all build run install test clean package help
@@ -24,9 +25,9 @@ build:
 
 package: build
 	@echo "Packaging $(APP_NAME) into DMG and ZIP..."
-	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(APP_BUNDLE)" -ov -format UDZO "$(APP_NAME).dmg"
-	ditto -c -k --sequesterRsrc --keepParent "$(APP_BUNDLE)" "$(APP_NAME).zip"
-	@echo "✅ Packaged: $(APP_NAME).dmg and $(APP_NAME).zip"
+	hdiutil create -volname "$(APP_NAME)" -srcfolder "$(APP_BUNDLE)" -ov -format UDZO "$(APP_NAME)-macOS-$(ARCH).dmg"
+	ditto -c -k --sequesterRsrc --keepParent "$(APP_BUNDLE)" "$(APP_NAME)-macOS-$(ARCH).zip"
+	@echo "✅ Packaged: $(APP_NAME)-macOS-$(ARCH).dmg and $(APP_NAME)-macOS-$(ARCH).zip"
 
 run: build
 	@echo "Launching $(APP_NAME)..."

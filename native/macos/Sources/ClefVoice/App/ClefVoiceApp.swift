@@ -53,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppViewModel.shared.checkPermissions()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        AppViewModel.shared.session.engine.terminate()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        AppViewModel.shared.session.engine.shutdown { sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 }

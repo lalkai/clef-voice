@@ -8,11 +8,13 @@ import (
 
 // Command is a line-delimited JSON-RPC request received on stdin.
 type Command struct {
-	Cmd      string          `json:"cmd"`
-	Config   json.RawMessage `json:"config"`
-	Model    string          `json:"model"`
-	ID       string          `json:"id"`
-	Favorite bool            `json:"favorite"`
+	SessionID string          `json:"session_id,omitempty"`
+	RequestID string          `json:"request_id,omitempty"`
+	Cmd       string          `json:"cmd"`
+	Config    json.RawMessage `json:"config"`
+	Model     string          `json:"model"`
+	ID        string          `json:"id"`
+	Favorite  bool            `json:"favorite"`
 }
 
 // Command names.
@@ -21,6 +23,10 @@ const (
 	CmdGetState           = "get_state"
 	CmdSetConfig          = "set_config"
 	CmdLoadModel          = "load_model"
+	CmdGetModels          = "get_models"
+	CmdDownloadModel      = "download_model"
+	CmdDeleteModel        = "delete_model"
+	CmdCancelDownload     = "cancel_download"
 	CmdStart              = "start"
 	CmdStop               = "stop"
 	CmdToggle             = "toggle"
@@ -54,19 +60,27 @@ func (e *Emitter) Ready(version string) {
 	e.emit(map[string]any{"type": "ready", "version": version})
 }
 
-func (e *Emitter) Status(status, message string) {
-	e.emit(map[string]any{"type": "status", "status": status, "message": message})
+func (e *Emitter) Status(status, message string, sessionIDs ...string) {
+	event := map[string]any{"type": "status", "status": status, "message": message}
+	if len(sessionIDs) > 0 && sessionIDs[0] != "" {
+		event["session_id"] = sessionIDs[0]
+	}
+	e.emit(event)
 }
 
 func (e *Emitter) Level(level float32) {
 	e.emit(map[string]any{"type": "level", "level": level})
 }
 
-func (e *Emitter) Transcribed(text string, wpm float64, language string, samples int) {
-	e.emit(map[string]any{
+func (e *Emitter) Transcribed(text string, wpm float64, language string, samples int, sessionIDs ...string) {
+	event := map[string]any{
 		"type": "transcribed", "text": text, "wpm": wpm,
 		"language": language, "samples": samples,
-	})
+	}
+	if len(sessionIDs) > 0 && sessionIDs[0] != "" {
+		event["session_id"] = sessionIDs[0]
+	}
+	e.emit(event)
 }
 
 func (e *Emitter) ModelProgress(model string, progress float64, downloading bool) {
@@ -94,4 +108,19 @@ func (e *Emitter) Config(cfg any) {
 
 func (e *Emitter) Error(message string) {
 	e.emit(map[string]any{"type": "error", "message": message})
+}
+
+func (e *Emitter) Models(snapshot any) {
+	e.emit(map[string]any{"type": "models", "models": snapshot})
+}
+
+// OperationError reports a failed command without stopping the active session.
+func (e *Emitter) OperationError(message string) {
+	e.emit(map[string]any{"type": "error", "message": message, "recoverable": true})
+}
+
+func (e *Emitter) Result(id, state, message string) {
+	if id != "" {
+		e.emit(map[string]any{"type": "command_result", "request_id": id, "state": state, "message": message, "result": true})
+	}
 }

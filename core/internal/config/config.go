@@ -2,8 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/clefvoice/core/internal/appconfig"
 	"github.com/clefvoice/core/internal/storage"
@@ -28,17 +32,17 @@ type Config struct {
 // Default returns the default configuration.
 func Default() Config {
 	return Config{
-		Languages:        []string{"th", "en"},
+		Languages:        []string{},
 		Model:            appconfig.DefaultModel,
-		Hotkey:           "Fn",
+		Hotkey:           appconfig.DefaultHotkey,
 		UseGPU:           true,
-		VADEnabled:       true,
+		VADEnabled:       appconfig.DefaultVADEnabled,
 		VADThreshold:     appconfig.DefaultVADThreshold,
-		AutoStopEnabled:  false,
-		AutoStopSeconds:  0.9,
-		RemoveFiller:     true,
-		AutoCapitalize:   true,
-		CustomVocabulary: []string{"ClefVoice", "TypeScript", "TailwindCSS"},
+		AutoStopEnabled:  appconfig.DefaultAutoStopEnabled,
+		AutoStopSeconds:  appconfig.DefaultAutoStopSeconds,
+		RemoveFiller:     appconfig.DefaultRemoveFiller,
+		AutoCapitalize:   appconfig.DefaultAutoCapitalize,
+		CustomVocabulary: appconfig.DefaultVocabulary(),
 	}
 }
 
@@ -58,12 +62,27 @@ func Load() Config {
 		return cfg
 	}
 	cfg := Default()
-	_ = json.Unmarshal(b, &cfg)
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return Default()
+	}
+	cfg.NormalizeVocabulary()
+	if err := cfg.Validate(); err != nil {
+		// Keep legacy vocabulary visible for correction without resetting other preferences.
+		audioOnly := cfg
+		audioOnly.CustomVocabulary = nil
+		if audioOnly.Validate() != nil {
+			return Default()
+		}
+	}
 	return cfg
 }
 
 // Save writes configuration to ~/.clefvoice/config.json atomically.
 func Save(cfg Config) error {
+	cfg.NormalizeVocabulary()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -81,4 +100,62 @@ func Save(cfg Config) error {
 	}
 	path := filepath.Join(dir, "config.json")
 	return storage.WritePrivateFile(path, b)
+}
+
+func (cfg *Config) NormalizeVocabulary() {
+	seen := map[string]bool{}
+	words := make([]string, 0, len(cfg.CustomVocabulary))
+	for _, word := range cfg.CustomVocabulary {
+		word = strings.TrimSpace(word)
+		if word != "" && !seen[word] {
+			words = append(words, word)
+			seen[word] = true
+		}
+	}
+	cfg.CustomVocabulary = words
+}
+
+func (cfg Config) Validate() error {
+	if len(cfg.CustomVocabulary) > appconfig.VocabularyWords {
+		return fmt.Errorf("custom vocabulary allows at most %d words", appconfig.VocabularyWords)
+	}
+	total := 0
+	for _, word := range cfg.CustomVocabulary {
+		length := utf8.RuneCountInString(word)
+		if length > appconfig.WordCharacters {
+			return fmt.Errorf("each vocabulary word allows at most %d Unicode characters", appconfig.WordCharacters)
+		}
+		total += length
+	}
+	if total > appconfig.VocabularyCharacters {
+		return fmt.Errorf("vocabulary allows at most %d Unicode characters in total", appconfig.VocabularyCharacters)
+	}
+	threshold := float64(cfg.VADThreshold)
+	if math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold <= 0 || threshold > 1 {
+		return fmt.Errorf("VAD threshold must be greater than 0 and at most 1")
+	}
+	if math.IsNaN(cfg.AutoStopSeconds) || math.IsInf(cfg.AutoStopSeconds, 0) || cfg.AutoStopSeconds <= 0 {
+		return fmt.Errorf("auto-stop pause must be greater than 0")
+	}
+	return nil
+}
+
+// VocabularyHints bounds legacy input without rewriting the saved vocabulary.
+func VocabularyHints(words []string) []string {
+	cfg := Config{CustomVocabulary: append([]string(nil), words...)}
+	cfg.NormalizeVocabulary()
+	hints := []string{}
+	total := 0
+	for _, word := range cfg.CustomVocabulary {
+		count := utf8.RuneCountInString(word)
+		if count > appconfig.WordCharacters || total+count > appconfig.VocabularyCharacters {
+			continue
+		}
+		if len(hints) >= appconfig.VocabularyWords {
+			break
+		}
+		hints = append(hints, word)
+		total += count
+	}
+	return hints
 }
